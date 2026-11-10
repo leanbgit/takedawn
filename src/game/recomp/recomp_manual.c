@@ -466,6 +466,10 @@ void recomp_icall_not_code_log(uint32_t va)
                     "(null or wild function pointer, at call #%llu)\n",
             va, (unsigned long long)hits[i],
             (unsigned long long)g_icall_count);
+    if (hits[i] == 1) {
+        extern void split4_guest_chain(void);
+        split4_guest_chain();
+    }
     fflush(stderr);
 }
 
@@ -494,3 +498,16 @@ void recomp_unimpl(const char *text, uint32_t va)
     }
     if (stop) abort();
 }
+
+/* Four-player split screen (src/game/split4.c, docs/split4.md): the world's
+ * constructor, the stage's start and the two-player stage's set-up. With
+ * BO3_SPLIT4 unset the generated bodies run as they are. */
+#include "../split4.h"
+extern void sub_001A9930_gen(void);
+extern void sub_00017450_gen(void);
+extern void sub_000209A0_gen(void);
+extern void sub_001AA100_gen(void);
+void sub_001AA100(void) { split4_world_load(sub_001AA100_gen); }   /* NTSC-U only */
+void sub_001A9930(void) { split4_world_ctor(sub_001A9930_gen); }   /* NTSC-U only */
+void sub_00017450(void) { split4_stage_start(sub_00017450_gen); }  /* NTSC-U only */
+void sub_000209A0(void) { split4_stage_setup(sub_000209A0_gen); }  /* NTSC-U only */

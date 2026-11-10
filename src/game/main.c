@@ -4124,6 +4124,7 @@ int main(int argc, char **argv)
     bo3_react_start();
     /* BO-130: RECOMP_DEBUG=autopilot=1 (autopilot.c). */
     bo3_autopilot_start(bo3_flips);
+    split4_start();                     /* BO3_SPLIT4: nothing unless set */
     /* graphics.softbody (softbody.c). */
     bo3_softbody_start(bo3_flips);
     /* BO-133: interface.menu_entry (menuentry.c). */

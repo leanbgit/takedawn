@@ -4,9 +4,11 @@ Goal: the title's two-player split screen with four players, one view in
 each quarter of the screen, each player with their own pad and car, exactly
 as the two-player stage behaves today.
 
-Status: steps 1 and 2 of the plan below. The human racers, setup records
-and player cameras are relocated and two players play as before; there is
-no four-player stage yet.
+Status: step 3 in progress. With `BO3_SPLIT4=1` the two-player stage
+races four humans and two AI rivals to the end without a fault (headless,
+null backend, players 3 and 4 driven by the title's AI with
+`BO3_SPLIT4_AI=1`). Only two views are drawn yet. Without `BO3_SPLIT4` two
+players race as before.
 
 ## Building this branch
 
@@ -84,12 +86,33 @@ and the two player cameras move to a four-slot block.
 2. Relocate the setup records and the player cameras; two players
    unchanged. **(done)** Still to do the same way: the views (`0x4D6200`) and
    RenderWare cameras (`0x4D6340`), the layout rectangles.
-3. A four-player stage: count 4, the slot 2 and 3 counterparts of every slot
-   1 site, four views in quarters (`sub_00053700`'s layout, the stage render
-   `sub_00020B30`).
+3. A four-player stage: count 4 (`split4_stage_start`), the slot 2 and 3
+   counterparts of every slot 1 site, four views in quarters
+   (`sub_00053700`'s layout, the split view builder `sub_0002F480`, the stage
+   render `sub_00020B30` / `sub_001AE2F0`). **The race runs (done); the views
+   are next.** Done so far:
+   - relocated as well: per-player camera data (`0x737710`, `0x1050`),
+     per-view data (`0x7397C8`, `0x1CC`), the per-player car pointer table
+     (`0x739C58`, 4 bytes), the human cars' physics objects (`0x667E90`,
+     `0x4AD0`, object-relative at listed sites only);
+   - counts raised to four at lift time (`"immediates"`): the cameras built
+     by the app (`0x157D3`), the physics objects built and set up
+     (`0x1A99F8`, `0x11028E`), the world's human set-up (`0x1A9EE8`);
+   - `recomp_manual.c` wrappers: the world's constructor (human vtables),
+     the world's load step 1 (camera reset for 3 and 4), the stage's start
+     (four humans, at most two AIs, cameras built), the two-player set-up
+     (setup records for pads 3 and 4).
 4. Pads 3 and 4 driving (controls.c's gate, the setup records' ports).
 5. HUD per view, results, sound.
 6. The front end: players 3 and 4 choose their cars (first: a setting).
+
+## Known limitations
+
+- **Track streaming follows two cars.** The streamer (`sub_001A20F0`) keeps
+  two foci in fixed locals (two section words, a count of 2, two pointers):
+  it follows players 1 and 2 only (`immediates`: its loop's end stays at
+  slot 1). Players 3 and 4 far from both may drive into track that is not
+  loaded. Four foci need that function rewritten.
 
 ## Checks
 
@@ -102,6 +125,12 @@ not saved), the null backend for logic, Vulkan for pictures:
 
 `BO3_SPLIT4_LOG` writes, every 30 flips, the racer counts and each human
 slot (vtable, index, phase, place, AI byte, position).
+
+Four players (logic, the AI driving 3 and 4):
+
+    SAVES=empty RECOMP_PB_BACKEND=null STOP_AT_END=1 DRIVE_SECS=60 \
+        tools/headless/split_scene.sh runs/s4 race BO3_SPLIT4=1 \
+        BO3_SPLIT4_AI=1 BO3_SPLIT4_LOG=$PWD/runs/s4/split4.txt
 
 `RECOMP_WATCH=0x73A1C0` names the writer of the player count (on Linux the
 toolkit now scans the guest stack for the chain).

@@ -1,37 +1,12 @@
-From 766b8ef5ccb7c0c9bf4350a123d03a3af1182d36 Mon Sep 17 00:00:00 2001
-From: Leandro Berto <leandroberto2010@gmail.com>
-Date: Tue, 10 Nov 2026 19:45:02 +0000
-Subject: [PATCH] recomp: lift-time relocation of fixed guest arrays
- (--relocate)
+From: Four-player split screen (takedawn branch 4p-splitscreen)
+Subject: [PATCH] recomp: lift-time relocation of fixed guest arrays (--relocate)
 
-A title's fixed-size BSS arrays cannot grow in place: the next global
-follows. Every access goes through a constant, though, so the lift can
-move one: immediates and displacements inside [lo, hi) become
-to + (v - lo); with "base", register-relative offsets into a fixed object
-too (never immediates: those overlap code addresses; never jmp/call
-operands: jump tables); with "size", a cmp against the old end becomes the
-new end (loop sentinels). Rewrites are listed in relocate_sites.txt.
+Against xboxrecomp takedawn-0.3.1. --relocate (tools/recomp/relocate.py):
+ranges, object-relative offsets (all sites or listed rel_sites), loop ends,
+listed immediates; g_xbox_image_extra; the POSIX RECOMP_WATCH guest chain.
+Apply with patches/apply-toolkit.sh.
 
-Runtime: g_xbox_image_extra reserves zeroed memory right after the image,
-before the toolkit region, so the target address is fixed at lift time.
-Zero keeps the old layout.
-
-RECOMP_WATCH on POSIX hosts: print the guest call chain scanned off the
-guest stack (as the Win32 path does) and the host pc on x86-64 Linux.
-
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01EEc1xt2bgZTWAVrjEf7eN6
 ---
- src/kernel/xbox_memory_layout.c |  45 +++++++++-
- src/kernel/xbox_memory_layout.h |   4 +
- tools/recomp/__main__.py        |  22 +++++
- tools/recomp/disasm.py          |  26 +++++-
- tools/recomp/relocate.py        | 144 ++++++++++++++++++++++++++++++++
- tools/recomp/test_relocate.py   |  87 +++++++++++++++++++
- 6 files changed, 325 insertions(+), 3 deletions(-)
- create mode 100644 tools/recomp/relocate.py
- create mode 100644 tools/recomp/test_relocate.py
-
 diff --git a/src/kernel/xbox_memory_layout.c b/src/kernel/xbox_memory_layout.c
 index 801f117..a76a6cb 100644
 --- a/src/kernel/xbox_memory_layout.c
@@ -164,7 +139,7 @@ index b84f841..c06c2d9 100644
            f" accesses lowered to direct calls", file=sys.stderr)
  
 diff --git a/tools/recomp/disasm.py b/tools/recomp/disasm.py
-index c2964d3..3f88265 100644
+index c2964d3..8040b62 100644
 --- a/tools/recomp/disasm.py
 +++ b/tools/recomp/disasm.py
 @@ -90,6 +90,9 @@ class Instruction:
@@ -177,7 +152,7 @@ index c2964d3..3f88265 100644
  @dataclass
  class Operand:
      """Parsed instruction operand."""
-@@ -151,17 +154,36 @@ def _init_reg_names(cs):
+@@ -151,17 +154,42 @@ def _init_reg_names(cs):
  
  def _parse_operand(cs, cs_op, insn_obj):
      """Convert a Capstone operand to our Operand dataclass."""
@@ -186,9 +161,15 @@ index c2964d3..3f88265 100644
 -        return Operand(type="imm", imm=cs_op.imm & 0xFFFFFFFF)
 +        imm = cs_op.imm & 0xFFFFFFFF
 +        if _relocate.active():
++            imm = _relocate.remap_imm_site(imm, addr)
 +            new = _relocate.remap(imm, addr, "imm")
-+            if new == imm and (getattr(insn_obj, "mnemonic", "") or "") == "cmp":
++            mn = getattr(insn_obj, "mnemonic", "") or ""
++            if new == imm and mn == "cmp":
 +                new = _relocate.remap_end(imm, addr)
++            elif new == imm and mn in ("add", "sub"):
++                # An object-relative offset added to a register that holds
++                # the object (add edi, 0x12B810): never a code address.
++                new = _relocate.remap_rel(imm, addr)
 +            imm = new
 +        return Operand(type="imm", imm=imm)
      elif cs_op.type == CS_OP_MEM:
@@ -218,10 +199,10 @@ index c2964d3..3f88265 100644
                       if getattr(cs_op.mem, "segment", 0) else None),
 diff --git a/tools/recomp/relocate.py b/tools/recomp/relocate.py
 new file mode 100644
-index 0000000..445c801
+index 0000000..134dd4d
 --- /dev/null
 +++ b/tools/recomp/relocate.py
-@@ -0,0 +1,144 @@
+@@ -0,0 +1,172 @@
 +"""Lift-time relocation of fixed guest data (``--relocate FILE``).
 +
 +A title keeps some arrays at fixed addresses in its BSS, sized for what it
@@ -252,6 +233,14 @@ index 0000000..445c801
 +offsets are small enough to be code addresses too. Never a jmp/call
 +operand (jump tables).
 +
++``"rel_sites"`` (optional, with ``base``): the object-relative rule applies
++only at these instruction addresses, for an object whose offsets other
++structures use too.
++
++A top-level ``"immediates"`` list replaces one immediate at a listed
++instruction (``{"va": ..., "from": 2, "to": 4}``: a loop count written for
++the old size); the instruction's immediate must be ``from``.
++
 +``"size"`` (optional) is the size of the block at ``to`` when it is larger
 +than the old array: a ``cmp`` against the old end (``hi``, a loop's
 +sentinel: ``cmp esi, 0x73F190 / jl``) is then rewritten to ``to + size``, so
@@ -270,6 +259,8 @@ index 0000000..445c801
 +# which keeps the output byte-for-byte what it was without the option.
 +_RANGES = []
 +_SIZES = {}
++_RELSITES = {}     # name -> set of instruction addresses (rel rule there only)
++_IMMS = {}         # instruction address -> (old, new, note)
 +_COUNTS = {}
 +_SITES = []
 +
@@ -285,6 +276,10 @@ index 0000000..445c801
 +        doc = json.load(f)
 +    rng = []
 +    _SIZES.clear()
++    _RELSITES.clear()
++    _IMMS.clear()
++    for i, m in enumerate(doc.get("immediates", [])):
++        _IMMS[_int(m["va"])] = (_int(m["from"]), _int(m["to"]), m.get("note", ""))
 +    for i, r in enumerate(doc.get("relocations", [])):
 +        lo, hi, to = _int(r["lo"]), _int(r["hi"]), _int(r["to"])
 +        if not lo < hi:
@@ -294,6 +289,8 @@ index 0000000..445c801
 +        if size < hi - lo:
 +            raise ValueError(f"relocation {i}: size below hi - lo")
 +        _SIZES[r.get("name") or f"r{i}"] = size
++        if "rel_sites" in r:
++            _RELSITES[r.get("name") or f"r{i}"] = {_int(v) for v in r["rel_sites"]}
 +        rng.append((lo, hi, to, r.get("name") or f"r{i}", base))
 +    rng.sort()
 +    for a, b in zip(rng, rng[1:]):
@@ -310,7 +307,16 @@ index 0000000..445c801
 +
 +
 +def active():
-+    return bool(_RANGES)
++    return bool(_RANGES) or bool(_IMMS)
++
++
++def remap_imm_site(value, insn_addr):
++    """``immediates``: the listed instruction's immediate, when it is the
++    expected old value (a fixed count written for two players)."""
++    m = _IMMS.get(insn_addr)
++    if m is None or value != m[0]:
++        return value
++    return _hit("immediates", insn_addr, "count", value, m[1])
 +
 +
 +def _hit(name, insn_addr, kind, old, new):
@@ -336,6 +342,9 @@ index 0000000..445c801
 +    if not _RANGES or disp is None or disp < 0:
 +        return disp
 +    for lo, hi, to, name, base in _RANGES:
++        sites = _RELSITES.get(name)
++        if sites is not None and insn_addr not in sites:
++            continue
 +        if base is not None and lo - base <= disp < hi - base:
 +            return _hit(name, insn_addr, "rel", disp, disp + (to - lo))
 +    return disp
@@ -368,10 +377,10 @@ index 0000000..445c801
 +    return len(seen)
 diff --git a/tools/recomp/test_relocate.py b/tools/recomp/test_relocate.py
 new file mode 100644
-index 0000000..1bc4dee
+index 0000000..6a464db
 --- /dev/null
 +++ b/tools/recomp/test_relocate.py
-@@ -0,0 +1,87 @@
+@@ -0,0 +1,116 @@
 +"""Tests for lift-time relocation (relocate.py, --relocate)."""
 +
 +import json
@@ -408,6 +417,8 @@ index 0000000..1bc4dee
 +    def tearDown(self):
 +        relocate._RANGES = []
 +        relocate._SIZES.clear()
++        relocate._RELSITES.clear()
++        relocate._IMMS.clear()
 +
 +    def load(self, entries):
 +        path = _cfg(entries)
@@ -451,6 +462,33 @@ index 0000000..1bc4dee
 +        # mov esi, 0x73f190 (the next array's base) stays
 +        self.assertEqual(_ops(bytes.fromhex("be90f17300"))[1].imm, 0x73F190)
 +
++    def load_doc(self, doc):
++        fd, path = tempfile.mkstemp(suffix=".json")
++        with os.fdopen(fd, "w") as f:
++            json.dump(doc, f)
++        try:
++            return relocate.load(path)
++        finally:
++            os.unlink(path)
++
++    def test_immediate_site(self):
++        self.load_doc({"relocations": [],
++                       "immediates": [{"va": "0x1000", "from": 2, "to": 4}]})
++        # mov edi, 2 at the listed address becomes 4; elsewhere it stays
++        self.assertEqual(_ops(bytes.fromhex("bf02000000"), 0x1000)[1].imm, 4)
++        self.assertEqual(_ops(bytes.fromhex("bf02000000"), 0x2000)[1].imm, 2)
++        # a different value at the listed address is left alone
++        self.assertEqual(_ops(bytes.fromhex("bf03000000"), 0x1000)[1].imm, 3)
++
++    def test_rel_sites_only(self):
++        self.load_doc({"relocations": [dict(
++            name="phys", lo="0x00667E90", hi="0x00671430", to="0x007A0000",
++            base="0x0064B310", rel_sites=["0x1000"])]})
++        # lea esi, [ebp + 0x1cb80]: rewritten at the site, not elsewhere
++        code = bytes.fromhex("8db580cb0100")
++        self.assertEqual(_ops(code, 0x1000)[1].mem_disp, 0x7A0000 - 0x64B310)
++        self.assertEqual(_ops(code, 0x2000)[1].mem_disp, 0x1CB80)
++
 +    def test_overlap_rejected(self):
 +        with self.assertRaises(ValueError):
 +            self.load([HUMANS, dict(HUMANS, name="b", lo="0x0073A1E0",
@@ -459,6 +497,3 @@ index 0000000..1bc4dee
 +
 +if __name__ == "__main__":
 +    unittest.main()
--- 
-2.43.0
-

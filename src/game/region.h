@@ -41,7 +41,15 @@
      : (unsigned)(va) - 0x004CFAD0u < 0x00000048u                              \
          ? (unsigned)(va) - 0x004CFAD0u + 0x0078A000u                          \
      : (unsigned)(va) - 0x004CFB20u < 0x000018A0u                              \
-         ? (unsigned)(va) - 0x004CFB20u + 0x0078A100u : (unsigned)(va))
+         ? (unsigned)(va) - 0x004CFB20u + 0x0078A100u                          \
+     : (unsigned)(va) - 0x00737710u < 0x000020A0u                              \
+         ? (unsigned)(va) - 0x00737710u + 0x0078E000u                          \
+     : (unsigned)(va) - 0x007397C8u < 0x00000398u                              \
+         ? (unsigned)(va) - 0x007397C8u + 0x00793000u                          \
+     : (unsigned)(va) - 0x00739C58u < 0x00000008u                              \
+         ? (unsigned)(va) - 0x00739C58u + 0x00793800u                          \
+     : (unsigned)(va) - 0x00667E90u < 0x000095A0u                              \
+         ? (unsigned)(va) - 0x00667E90u + 0x007A0000u : (unsigned)(va))
 #define BO3_VA(ntsc, pal, ensv)  BO3_SPLIT4_RELOC(ntsc)
 #define BO3_SUB(ntsc, pal, ensv) ntsc
 #define BO3_REGION_NAME          "NTSC-U"

@@ -16,7 +16,7 @@
 /* The block after the image: 64 KB aligned after the USA image's end
  * (0x007792E0), so 0x00780000. split4_check() verifies it at boot. */
 #define SPLIT4_EXTRA_BASE    0x00780000u
-#define SPLIT4_EXTRA_BYTES   0x00020000u
+#define SPLIT4_EXTRA_BYTES   0x00040000u
 
 /* The race world (a static object) and its human racers. */
 #define SPLIT4_WORLD         0x0060EA00u
@@ -29,6 +29,15 @@ void split4_reserve(void);
 /* After it: the block must be where the lift put the arrays. Returns 0 and
  * prints why when it is not (the build then runs with corrupt memory). */
 int split4_check(void);
+/* BO3_SPLIT4=1: the two-player stage plays four (step 3, bring-up). */
+int split4_enabled(void);
+/* At start-up, before the guest runs (main.c): registers the mark hooks. */
+void split4_start(void);
+/* Wrappers of generated functions (recomp/recomp_manual.c). */
+void split4_world_ctor(void (*gen)(void));    /* sub_001A9930 */
+void split4_world_load(void (*gen)(void));    /* sub_001AA100 */
+void split4_stage_start(void (*gen)(void));   /* sub_00017450 */
+void split4_stage_setup(void (*gen)(void));   /* sub_000209A0 */
 /* Once a flip (main.c): BO3_SPLIT4_LOG. */
 void split4_log(uint32_t flip);
 
