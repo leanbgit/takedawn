@@ -9,6 +9,23 @@
       "size": "0x00009F80",
       "base": "0x0060EA00",
       "note": "The race world's human racers (world 0x60EA00 + 0x12B7D0, stride 0x27E0, two slots; the AI racers follow at + 0x130790). Built by sub_001AACB0 from the stage's player count, constructed (vtable 0x3B11A0) by sub_001A9930. Four slots of 0x27E0."
+    },
+    {
+      "name": "setup",
+      "lo": "0x004CFAD0",
+      "hi": "0x004CFB18",
+      "to": "0x0078A000",
+      "size": "0x00000090",
+      "note": "The player setup records (0x24 each, two slots: +0 the profile, +0x18 the pad port, +0x1C, +0x20), filled by the stage set-up (sub_000209A0, unrolled) and pointed to by each human racer's +0x2470 (sub_001AACB0: 0x4CFAD0 + 0x24 x player). Four slots."
+    },
+    {
+      "name": "cameras",
+      "lo": "0x004CFB20",
+      "hi": "0x004D13C0",
+      "to": "0x0078A100",
+      "size": "0x00003140",
+      "base": "0x004A71A0",
+      "note": "The players' cameras (vtable call +0xC; app 0x4A71A0 + 0x28980, 0xC50 each, two slots; indexed by the human's +0x27D0). Built by the app constructor (0x157D3: mov ebx, 2 / sub_00015900). The third camera object right after them (0x4D13C0) is reached only by fixed addresses (256 sites) and stays where it is. Four slots."
     }
   ]
 }

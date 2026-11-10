@@ -4,8 +4,9 @@ Goal: the title's two-player split screen with four players, one view in
 each quarter of the screen, each player with their own pad and car, exactly
 as the two-player stage behaves today.
 
-Status: step 1 of the plan below. The human racers are relocated and two
-players play as before; there is no four-player stage yet.
+Status: steps 1 and 2 of the plan below. The human racers, setup records
+and player cameras are relocated and two players play as before; there is
+no four-player stage yet.
 
 ## How the title holds its players
 
@@ -57,11 +58,18 @@ render, results). Each needs its third and fourth counterparts: a guest
 patch or a function override in `recomp_manual.c`. The humans relocation has
 27 such sites.
 
+The cameras: the app object (`0x4A71A0`) holds the players' cameras at
+`+0x28980` (`0x4CFB20`, `0xC50` each, indexed by the human's `+0x27D0`), built
+two by the app constructor (`0x157D3: mov ebx, 2`). A third camera object
+follows (`0x4D13C0`); it is reached only by fixed addresses, so it stays put
+and the two player cameras move to a four-slot block.
+
 ## Plan
 
 1. Relocate the human racers; two players unchanged. **(done)**
-2. Relocate the setup records, race records, views and cameras the same way;
-   two players unchanged.
+2. Relocate the setup records and the player cameras; two players
+   unchanged. **(done)** Still to do the same way: the views (`0x4D6200`) and
+   RenderWare cameras (`0x4D6340`), the layout rectangles.
 3. A four-player stage: count 4, the slot 2 and 3 counterparts of every slot
    1 site, four views in quarters (`sub_00053700`'s layout, the stage render
    `sub_00020B30`).
@@ -83,3 +91,95 @@ slot (vtable, index, phase, place, AI byte, position).
 
 `RECOMP_WATCH=0x73A1C0` names the writer of the player count (on Linux the
 toolkit now scans the guest stack for the chain).
+
+## Sites that name slot 1 (or a loop's end)
+
+From `relocate_sites.txt` (steps 1 and 2). Each is code written for two
+players and needs the third and fourth player's counterpart in step 3.
+Also known, not in this list: `0x157D3` (`mov ebx, 2`, two cameras built),
+`0x167F0E` (`index != 1`: "the other player"), `0x00020AAA`-area set-up of
+the stage (`sub_000209A0`), the render `sub_00020B30`.
+
+| Site | Array | What |
+|---|---|---|
+| `0x000127E9` | setup | slot 1 `+0x20` (mem) |
+| `0x000148B4` | setup | slot 1 `+0x20` (mem) |
+| `0x00015EAA` | cameras | slot 1 `+0x0` (rel) |
+| `0x00016CBC` | cameras | slot 1 `+0xC46` (rel) |
+| `0x00016D9F` | cameras | slot 1 `+0x0` (rel) |
+| `0x00016DA5` | cameras | slot 1 `+0x0` (rel) |
+| `0x00017186` | cameras | slot 1 `+0x0` (rel) |
+| `0x00018997` | cameras | slot 1 `+0xC3C` (mem) |
+| `0x0001A078` | setup | slot 1 `+0x20` (mem) |
+| `0x0001A86C` | setup | slot 1 `+0x20` (mem) |
+| `0x0001A887` | setup | slot 1 `+0x1C` (mem) |
+| `0x0001AB50` | setup | slot 1 `+0x20` (mem) |
+| `0x0001AE9E` | setup | slot 1 `+0x20` (mem) |
+| `0x0001AEA4` | setup | slot 1 `+0x1C` (mem) |
+| `0x00020822` | cameras | slot 1 `+0xC3C` (mem) |
+| `0x000209F6` | setup | slot 1 `+0x18` (mem) |
+| `0x00020A23` | setup | slot 1 `+0x0` (mem) |
+| `0x00020A3C` | setup | slot 1 `+0x20` (mem) |
+| `0x00020A43` | setup | slot 1 `+0x1C` (mem) |
+| `0x00020B9A` | humans | slot 1 `+0x0` (imm) |
+| `0x00020CB0` | setup | slot 1 `+0x20` (mem) |
+| `0x00020CB7` | setup | slot 1 `+0x1C` (mem) |
+| `0x00024461` | humans | slot 1 `+0x1138` (mem) |
+| `0x0002446C` | humans | slot 1 `+0x0` (imm) |
+| `0x0002447C` | humans | slot 1 `+0x16C8` (mem) |
+| `0x0002479A` | cameras | slot 1 `+0x0` (mem) |
+| `0x000247A4` | cameras | slot 1 `+0x0` (imm) |
+| `0x0002488B` | cameras | slot 1 `+0x0` (mem) |
+| `0x00024895` | cameras | slot 1 `+0x0` (imm) |
+| `0x000248A4` | cameras | slot 1 `+0x0` (mem) |
+| `0x000248AE` | cameras | slot 1 `+0x0` (imm) |
+| `0x00024914` | cameras | slot 1 `+0x0` (mem) |
+| `0x0002491E` | cameras | slot 1 `+0x0` (imm) |
+| `0x00026003` | cameras | slot 1 `+0x0` (mem) |
+| `0x0002600C` | cameras | slot 1 `+0x0` (imm) |
+| `0x000261B8` | cameras | slot 1 `+0x0` (mem) |
+| `0x000261C1` | cameras | slot 1 `+0x0` (imm) |
+| `0x00026958` | cameras | slot 1 `+0x0` (mem) |
+| `0x00026960` | cameras | slot 1 `+0x0` (imm) |
+| `0x00026A4C` | cameras | slot 1 `+0x0` (mem) |
+| `0x00026A56` | cameras | slot 1 `+0x0` (imm) |
+| `0x00026CEA` | cameras | slot 1 `+0x0` (mem) |
+| `0x00026CF4` | cameras | slot 1 `+0x0` (imm) |
+| `0x00027232` | cameras | slot 1 `+0x0` (mem) |
+| `0x00027237` | cameras | slot 1 `+0x0` (imm) |
+| `0x0002A10A` | cameras | slot 1 `+0xC47` (mem) |
+| `0x0002D946` | humans | slot 1 `+0x1768` (mem) |
+| `0x0002D969` | humans | slot 1 `+0x1758` (mem) |
+| `0x000508E2` | humans | slot 1 `+0x0` (imm) |
+| `0x000535B5` | humans | slot 1 `+0x0` (imm) |
+| `0x000535BF` | humans | slot 1 `+0x16D0` (imm) |
+| `0x00060FDB` | humans | slot 1 `+0x16D0` (imm) |
+| `0x00060FE7` | humans | slot 1 `+0x1768` (mem) |
+| `0x00061A3C` | humans | slot 1 `+0x16D0` (mem) |
+| `0x00061ACD` | humans | slot 1 `+0x16D8` (mem) |
+| `0x00067C49` | setup | slot 1 `+0x0` (imm) |
+| `0x00072D43` | humans | slot 1 `+0x1768` (mem) |
+| `0x00072F38` | cameras | slot 1 `+0x0` (mem) |
+| `0x00072F40` | cameras | slot 1 `+0x0` (imm) |
+| `0x00073536` | humans | slot 1 `+0x1764` (mem) |
+| `0x00073836` | humans | slot 1 `+0x1764` (mem) |
+| `0x00073A92` | humans | slot 1 `+0x1768` (mem) |
+| `0x0007A5E2` | setup | slot 1 `+0x4` (mem) |
+| `0x0007A5EE` | setup | slot 1 `+0x4` (imm) |
+| `0x0007A9AF` | setup | slot 1 `+0x0` (imm) |
+| `0x000B6538` | humans | slot 1 `+0x1768` (mem) |
+| `0x000B6582` | humans | slot 1 `+0x1768` (mem) |
+| `0x000B67FA` | humans | slot 1 `+0x1984` (imm) |
+| `0x000B6890` | humans | slot 1 `+0x1768` (mem) |
+| `0x000E5138` | humans | slot 1 `+0x1768` (mem) |
+| `0x000E608D` | humans | slot 1 `+0x1768` (mem) |
+| `0x000E7A5A` | humans | slot 1 `+0x1984` (imm) |
+| `0x00167DD6` | cameras | slot 1 `+0xC20` (mem) |
+| `0x00167DE4` | cameras | slot 1 `+0xC18` (mem) |
+| `0x00167DF9` | cameras | slot 1 `+0xC47` (mem) |
+| `0x0017E28A` | humans | slot 1 `+0x1754` (mem) |
+| `0x001A2265` | humans | loop end `0x0073F190` -> `0x00789F80` |
+| `0x001A9950` | humans | slot 1 `+0x0` (rel) |
+| `0x001AA142` | cameras | slot 1 `+0x0` (mem) |
+| `0x001AA14C` | cameras | slot 1 `+0x0` (imm) |
+| `0x001AA290` | humans | slot 1 `+0x27D9` (rel) |
