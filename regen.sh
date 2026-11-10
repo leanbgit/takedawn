@@ -108,6 +108,14 @@ MEMORD=()
 MEM_ORDER="${MEM_ORDER-$CFG/mem_order.json}"
 [[ -n "$MEM_ORDER" && -f "$MEM_ORDER" ]] && MEMORD=(--mem-order "$MEM_ORDER")
 
+# Four-player split screen (tools.recomp --relocate): config/relocate.json
+# moves the title's two-slot player arrays into larger blocks right after the
+# image (src/game/split4.c asks the runtime for the room). RELOCATE= (empty)
+# generates without it: the title as shipped.
+RELOC=()
+RELOCATE="${RELOCATE-$CFG/relocate.json}"
+[[ -n "$RELOCATE" && -f "$RELOCATE" ]] && RELOC=(--relocate "$RELOCATE")
+
 if [[ "${1:-}" == "--disasm" || ! -f "$OUT/disasm/functions.json" ]]; then
     echo "==> xbe_parser"
     (cd "$RECOMP" && py -3 -m tools.xbe_parser "$XBE" \
@@ -142,6 +150,7 @@ echo "==> recomp"
     ${SPIN[@]+"${SPIN[@]}"} \
     ${PATCH[@]+"${PATCH[@]}"} \
     ${MEMORD[@]+"${MEMORD[@]}"} \
+    ${RELOC[@]+"${RELOC[@]}"} \
     ${TRACE_FUNCS:+--trace-functions "$TRACE_FUNCS"} \
     --gen-dir     "$GEN" \
     -o "$OUT/recomp"

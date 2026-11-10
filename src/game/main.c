@@ -68,6 +68,7 @@ extern void xbox_InputPanicStop(int wait_ms);
 #include "recomp_icall_feedback.h"
 #include "kernel.h"
 #include "xbox_memory_layout.h"
+#include "split4.h"
 #include "usb/ohci.h"
 #include "region.h"                   /* BO3_VA: NTSC-U or PAL addresses */
 #include "controls.h"                 /* input.control_scheme (BO-106) */
@@ -1988,6 +1989,7 @@ static int host_main(void)
     printf("XBE loaded: %zu bytes\n", xbe_size);
 
 
+    split4_reserve();
     if (!xbox_MemoryLayoutInit(xbe_data, xbe_size)) {
         XR_ERROR( "Xbox memory layout init failed "
                         "(required VA range unavailable?)\n");
@@ -1997,6 +1999,12 @@ static int host_main(void)
                    "Close other programs, and any other copy of the game, and start it again."
                    " Restarting the computer usually frees the range. If it keeps happening,"
                    " send the log with a bug report.");
+        return 1;
+    }
+    if (!split4_check()) {
+        free(xbe_data);
+        host_fatal("The four-player build does not match this game executable.",
+                   "Build it again from the USA disc's default.xbe (regen.sh).");
         return 1;
     }
     g_xbox_mem_offset = xbox_GetMemoryOffset();
@@ -2434,6 +2442,7 @@ static void uw_flip(void)
     bo3_xboxlive_flip();                /* Takedawn Online's code entry and description line */
     bo3_online_flip();                  /* links, kick line, reactions: main thread only */
     pace_log(n);
+    split4_log(n);
     /* The simulation steps this frame ran (the stepper's count, +0x2E20C:
      * see BO3_PACE_LOG), for the overlay's frame-time graph: a frame of two
      * steps moves the world twice as far (present_cadence.h, BO-115). */

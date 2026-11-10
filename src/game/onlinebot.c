@@ -168,7 +168,7 @@
 #define OB_MBOX_KIND   (OB_MBOX + 0x184u)
 #define OB_PEERS       0x00572988u   /* the title's peer table */
 #define OB_NPEERS      0x005729A8u
-#define OB_CAR1        0x0073A1D0u   /* player 1's car (autopilot.c) */
+#define OB_CAR1        BO3_SPLIT4_RELOC(0x0073A1D0u)   /* player 1's car (autopilot.c; relocated, docs/split4.md) */
 #define OB_RACERS      0x0073A19Cu
 
 #define OB_SETTLE_MS     600u        /* a screen holds this long before a press */

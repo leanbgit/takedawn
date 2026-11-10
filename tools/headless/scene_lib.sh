@@ -304,6 +304,19 @@ to_main_menu() {
         press_until start:300 '_FEMain[.]xmv' 60
     fi
     wait_log '_FEMain[.]xmv' "attract (_FEMain.xmv)"
+    if [ "${SAVES:-}" = empty ]; then
+        # SAVES=empty: the first-boot screens. A new profile that is not
+        # saved, as skip_tutorial.sh does it (no reference saves needed).
+        wait_flip $(( $(anchor '_FEMain[.]xmv') + 300 ))
+        press start:600 150         # Select Option: New Profile
+        press a:400 150             # the keyboard, cursor on Done
+        press a:400 150             # save your profile? No
+        press a:400 150             # Autosave will be disabled: No
+        press up:200 30             # Yes
+        press a:400 240             # the main menu
+        note "main menu (new profile, not saved)"
+        return 0
+    fi
     shot menu_attract "$(anchor '_FEMain[.]xmv')" 150 12
     press_until start:600 'SaveMeta[.]xbx' 180
     wait_flips 90

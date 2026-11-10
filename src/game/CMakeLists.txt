@@ -46,6 +46,7 @@ if(ANDROID)
         soundbank.c
         traffic_bp.c
         hirefresh.c
+        split4.c
         hraudit.c
     mixer.c
     gp_image.c
@@ -116,6 +117,7 @@ add_executable(burnout3
     soundbank.c
     traffic_bp.c
     hirefresh.c
+    split4.c
     hraudit.c
     mixer.c
     gp_image.c

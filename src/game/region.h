@@ -31,7 +31,14 @@
 #define BO3_SUB(ntsc, pal, ensv) pal
 #define BO3_REGION_NAME          "PAL"
 #else
-#define BO3_VA(ntsc, pal, ensv)  (ntsc)
+/* Four-player split screen (docs/split4.md): the lift moves the human
+ * racers (0x73A1D0, two slots of 0x27E0) to 0x780000 (config/relocate.json,
+ * src/game/split4.h), so the port's own C follows them here. Still a
+ * constant expression. */
+#define BO3_SPLIT4_RELOC(va)                                                   \
+    ((unsigned)(va) - 0x0073A1D0u < 0x00004FC0u                                \
+         ? (unsigned)(va) - 0x0073A1D0u + 0x00780000u : (unsigned)(va))
+#define BO3_VA(ntsc, pal, ensv)  BO3_SPLIT4_RELOC(ntsc)
 #define BO3_SUB(ntsc, pal, ensv) ntsc
 #define BO3_REGION_NAME          "NTSC-U"
 #endif
