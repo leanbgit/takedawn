@@ -1,0 +1,464 @@
+From 766b8ef5ccb7c0c9bf4350a123d03a3af1182d36 Mon Sep 17 00:00:00 2001
+From: Leandro Berto <leandroberto2010@gmail.com>
+Date: Tue, 10 Nov 2026 19:45:02 +0000
+Subject: [PATCH] recomp: lift-time relocation of fixed guest arrays
+ (--relocate)
+
+A title's fixed-size BSS arrays cannot grow in place: the next global
+follows. Every access goes through a constant, though, so the lift can
+move one: immediates and displacements inside [lo, hi) become
+to + (v - lo); with "base", register-relative offsets into a fixed object
+too (never immediates: those overlap code addresses; never jmp/call
+operands: jump tables); with "size", a cmp against the old end becomes the
+new end (loop sentinels). Rewrites are listed in relocate_sites.txt.
+
+Runtime: g_xbox_image_extra reserves zeroed memory right after the image,
+before the toolkit region, so the target address is fixed at lift time.
+Zero keeps the old layout.
+
+RECOMP_WATCH on POSIX hosts: print the guest call chain scanned off the
+guest stack (as the Win32 path does) and the host pc on x86-64 Linux.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01EEc1xt2bgZTWAVrjEf7eN6
+---
+ src/kernel/xbox_memory_layout.c |  45 +++++++++-
+ src/kernel/xbox_memory_layout.h |   4 +
+ tools/recomp/__main__.py        |  22 +++++
+ tools/recomp/disasm.py          |  26 +++++-
+ tools/recomp/relocate.py        | 144 ++++++++++++++++++++++++++++++++
+ tools/recomp/test_relocate.py   |  87 +++++++++++++++++++
+ 6 files changed, 325 insertions(+), 3 deletions(-)
+ create mode 100644 tools/recomp/relocate.py
+ create mode 100644 tools/recomp/test_relocate.py
+
+diff --git a/src/kernel/xbox_memory_layout.c b/src/kernel/xbox_memory_layout.c
+index 801f117..a76a6cb 100644
+--- a/src/kernel/xbox_memory_layout.c
++++ b/src/kernel/xbox_memory_layout.c
+@@ -2141,6 +2141,15 @@ ptrdiff_t g_xbox_mem_offset = 0;
+ uint32_t g_xbox_image_lo = 0;
+ uint32_t g_xbox_image_hi = 0;
+ 
++/* Bytes of zeroed guest memory the title's host code asks for right after
++ * the image (set before xbox_MemoryLayoutInit). The toolkit region is
++ * placed above them, so nothing of the toolkit, the stack or the heap ever
++ * lands there: the host can relocate a fixed-size guest array into it at
++ * lift time (the address is known before the title runs). Zero: the old
++ * layout, byte for byte. g_xbox_image_extra_base is where it starts. */
++uint32_t g_xbox_image_extra = 0;
++uint32_t g_xbox_image_extra_base = 0;
++
+ /* Toolkit region placement (xbox_memory_layout.h). The initial values are the
+  * small-image layout; xbox_MemoryLayoutInit recomputes them from the image. */
+ uint32_t g_xbox_region_base = XBOX_REGION_MIN;
+@@ -2652,10 +2661,35 @@ static void watch_posix_stack(void *ucv)
+     }
+     if (reps)
+         fprintf(stderr, "            (previous frame x%d more)\n", reps);
++#else
++#if defined(__linux__) && defined(__x86_64__)
++    {
++        ucontext_t *uc = (ucontext_t *)ucv;
++        watch_sym((void *)(uintptr_t)uc->uc_mcontext.gregs[REG_RIP], "#", 0);
++    }
+ #else
+     (void)ucv;
++#endif
+     fprintf(stderr, "         (host stack not available on this host)\n");
+ #endif
++    /* The guest call chain, scanned off the guest stack as the Win32 path
++     * does (return addresses the recompiled code pushed, innermost first;
++     * values that merely look like code are printed too). Works wherever
++     * the host stack cannot be walked. */
++    {
++        const uint8_t *mem = (const uint8_t *)g_memory_offset;
++        uint32_t esp = g_esp, i, shown = 0;
++        for (i = 0; esp && i < 256u && shown < 12u; i++) {
++            uint32_t slot = esp + i * 4u, v;
++            if (slot < 0x10000u || slot + 4u > g_memory_size)
++                break;
++            v = *(const uint32_t *)(mem + slot);
++            if (v >= g_xbox_code_lo && v < g_xbox_code_hi) {
++                fprintf(stderr, "         guest [esp+%-4u] %08X\n", i * 4u, v);
++                shown++;
++            }
++        }
++    }
+ }
+ 
+ static void watch_posix_handler(int sig, siginfo_t *si, void *ucv)
+@@ -3495,7 +3529,16 @@ BOOL xbox_MemoryLayoutInit(const void *xbe_data, size_t xbe_size)
+     {
+         const uint32_t MB = 1024u * 1024u;
+         uint32_t image_end = (g_xbox_image_hi + 0xFFFFu) & ~0xFFFFu;
+-        uint32_t region = image_end > XBOX_REGION_MIN ? image_end : XBOX_REGION_MIN;
++        uint32_t region;
++        if (g_xbox_image_extra) {
++            /* The title's extra block: 64 KB aligned after the image, the
++             * region after it. */
++            g_xbox_image_extra_base = image_end;
++            image_end = (image_end + g_xbox_image_extra + 0xFFFFu) & ~0xFFFFu;
++            fprintf(stderr, "  Image extra: %u KB at 0x%08X (title host code)\n",
++                    g_xbox_image_extra / 1024, g_xbox_image_extra_base);
++        }
++        region = image_end > XBOX_REGION_MIN ? image_end : XBOX_REGION_MIN;
+         uint32_t stack_base = region + XBOX_REGION_STACK_OFF;
+         uint32_t top = XBOX_HEAP_TOP;
+         uint32_t avail = top > stack_base ? top - stack_base : 0;
+diff --git a/src/kernel/xbox_memory_layout.h b/src/kernel/xbox_memory_layout.h
+index d893f33..fd79d64 100644
+--- a/src/kernel/xbox_memory_layout.h
++++ b/src/kernel/xbox_memory_layout.h
+@@ -96,6 +96,10 @@ uint32_t xbox_ReserveAlloc(uint32_t size, uint32_t align);
+  * stay out of this range. */
+ extern uint32_t g_xbox_image_lo;
+ extern uint32_t g_xbox_image_hi;
++/* Zeroed guest memory right after the image for the title's host code
++ * (set before xbox_MemoryLayoutInit; xbox_memory_layout.c). */
++extern uint32_t g_xbox_image_extra;
++extern uint32_t g_xbox_image_extra_base;
+ 
+ extern uint32_t g_xbox_code_lo;
+ extern uint32_t g_xbox_code_hi;
+diff --git a/tools/recomp/__main__.py b/tools/recomp/__main__.py
+index b84f841..c06c2d9 100644
+--- a/tools/recomp/__main__.py
++++ b/tools/recomp/__main__.py
+@@ -290,8 +290,25 @@ def main():
+                              "RECOMP_ACQUIRE_FENCE(). Writes mem_order.json "
+                              "to -o. Without it the output is unchanged")
+ 
++    parser.add_argument("--relocate", metavar="JSON",
++                        help="Lift-time relocation of fixed guest arrays "
++                             "(tools/recomp/relocate.py): {\"relocations\": "
++                             "[{\"lo\": ..., \"hi\": ..., \"to\": ...}]}. "
++                             "Immediates and displacements in [lo, hi) become "
++                             "to + (v - lo). Writes relocate_sites.txt to -o. "
++                             "Without it the output is unchanged")
++
+     args = parser.parse_args()
+ 
++    if args.relocate:
++        from . import relocate
++        try:
++            n = relocate.load(args.relocate)
++        except (OSError, ValueError, KeyError) as e:
++            print(f"ERROR: --relocate {args.relocate}: {e}", file=sys.stderr)
++            sys.exit(1)
++        print(f"Relocate: {n} ranges from {args.relocate}", file=sys.stderr)
++
+     mem_order = None
+     if args.mem_order:
+         from .mem_order import MemOrderConfig
+@@ -591,6 +608,11 @@ def main():
+         _finish_patches(translator.translator.lifter.patches, output_dir)
+     if translator.translator.lifter.mem_order is not None:
+         _finish_mem_order(translator.translator.lifter.mem_order, output_dir)
++    if args.relocate:
++        from . import relocate
++        n = relocate.write_report(os.path.join(output_dir, "relocate_sites.txt"))
++        print(f"Relocate: {n} operands rewritten {relocate.summary()}",
++              file=sys.stderr)
+     print(f"MMIO: {translator.translator.mmio_lowered} constant device-register"
+           f" accesses lowered to direct calls", file=sys.stderr)
+ 
+diff --git a/tools/recomp/disasm.py b/tools/recomp/disasm.py
+index c2964d3..3f88265 100644
+--- a/tools/recomp/disasm.py
++++ b/tools/recomp/disasm.py
+@@ -90,6 +90,9 @@ class Instruction:
+         return self.address + self.size
+ 
+ 
++from . import relocate as _relocate
++
++
+ @dataclass
+ class Operand:
+     """Parsed instruction operand."""
+@@ -151,17 +154,36 @@ def _init_reg_names(cs):
+ 
+ def _parse_operand(cs, cs_op, insn_obj):
+     """Convert a Capstone operand to our Operand dataclass."""
++    addr = getattr(insn_obj, "address", None)
+     if cs_op.type == CS_OP_IMM:
+-        return Operand(type="imm", imm=cs_op.imm & 0xFFFFFFFF)
++        imm = cs_op.imm & 0xFFFFFFFF
++        if _relocate.active():
++            new = _relocate.remap(imm, addr, "imm")
++            if new == imm and (getattr(insn_obj, "mnemonic", "") or "") == "cmp":
++                new = _relocate.remap_end(imm, addr)
++            imm = new
++        return Operand(type="imm", imm=imm)
+     elif cs_op.type == CS_OP_MEM:
+         base = _reg_names.get(cs_op.mem.base) if cs_op.mem.base else None
+         index = _reg_names.get(cs_op.mem.index) if cs_op.mem.index else None
++        disp = cs_op.mem.disp & 0xFFFFFFFF if cs_op.mem.disp >= 0 else cs_op.mem.disp
++        if _relocate.active() and getattr(cs_op.mem, "segment", 0) == 0:
++            mn = getattr(insn_obj, "mnemonic", "") or ""
++            if base is None and index is None:
++                disp = _relocate.remap(disp, addr, "mem")
++            elif base is not None and not (mn.startswith("j") or mn.startswith("call")):
++                # A register-relative operand: the absolute rule (a fixed
++                # array indexed by a register), then the object-relative one.
++                new = _relocate.remap(disp, addr, "mem")
++                disp = new if new != disp else _relocate.remap_rel(disp, addr)
++            elif index is not None:
++                disp = _relocate.remap(disp, addr, "mem")
+         return Operand(
+             type="mem",
+             mem_base=base,
+             mem_index=index,
+             mem_scale=cs_op.mem.scale,
+-            mem_disp=cs_op.mem.disp & 0xFFFFFFFF if cs_op.mem.disp >= 0 else cs_op.mem.disp,
++            mem_disp=disp,
+             mem_size=cs_op.size,
+             mem_seg=(_reg_names.get(cs_op.mem.segment)
+                      if getattr(cs_op.mem, "segment", 0) else None),
+diff --git a/tools/recomp/relocate.py b/tools/recomp/relocate.py
+new file mode 100644
+index 0000000..445c801
+--- /dev/null
++++ b/tools/recomp/relocate.py
+@@ -0,0 +1,144 @@
++"""Lift-time relocation of fixed guest data (``--relocate FILE``).
++
++A title keeps some arrays at fixed addresses in its BSS, sized for what it
++shipped with (Burnout 3: two players). Growing one in place is impossible:
++the next global follows it directly. Every access the code makes goes
++through a constant, though -- the array's base, a field of a fixed slot, or
++a base plus an index -- so the lift can move the whole array: each
++immediate and each memory displacement inside ``[lo, hi)`` becomes
++``to + (value - lo)``. Code that indexes past the old end then lands in the
++new, larger block instead of the neighbour's memory.
++
++The block at ``to`` must be guest memory nothing else uses; the runtime
++gives a title such a block right after its image (``g_xbox_image_extra``,
++xbox_memory_layout.c), so the address is fixed before the title runs.
++
++FILE is JSON::
++
++    {"relocations": [
++        {"lo": "0x0073A1D0", "hi": "0x0073F190", "to": "0x00780000",
++         "note": "..."}
++    ]}
++
++``hi`` is exclusive. An entry may also give ``"base"``: the address of a
++fixed object the array lives in, which code also reaches as a register plus
++an offset (``[esi + 0x12B7D0]`` with esi = the object). A memory
++displacement in ``[lo - base, hi - base)`` whose address has a base register
++is then rewritten to ``disp + (to - lo)`` as well. Never an immediate: such
++offsets are small enough to be code addresses too. Never a jmp/call
++operand (jump tables).
++
++``"size"`` (optional) is the size of the block at ``to`` when it is larger
++than the old array: a ``cmp`` against the old end (``hi``, a loop's
++sentinel: ``cmp esi, 0x73F190 / jl``) is then rewritten to ``to + size``, so
++a loop over every slot covers the new ones. Ranges must not overlap, and neither may the targets.
++Only operands are rewritten: data words in the image that hold such an
++address are not (check there are none before relying on this). Branch and
++call targets are code addresses and never fall in a data range.
++
++Every rewrite is counted by range and, when a report path is given, listed
++(instruction, operand kind, old, new) so a change in the lift is auditable.
++"""
++
++import json
++
++# (lo, hi, to, name) tuples, set by load(); empty means no rewriting at all,
++# which keeps the output byte-for-byte what it was without the option.
++_RANGES = []
++_SIZES = {}
++_COUNTS = {}
++_SITES = []
++
++
++def _int(v):
++    return int(v, 0) if isinstance(v, str) else int(v)
++
++
++def load(path):
++    """Read the relocation list; raise ValueError on overlapping ranges."""
++    global _RANGES
++    with open(path, "r", encoding="utf-8") as f:
++        doc = json.load(f)
++    rng = []
++    _SIZES.clear()
++    for i, r in enumerate(doc.get("relocations", [])):
++        lo, hi, to = _int(r["lo"]), _int(r["hi"]), _int(r["to"])
++        if not lo < hi:
++            raise ValueError(f"relocation {i}: lo must be below hi")
++        base = _int(r["base"]) if "base" in r else None
++        size = _int(r["size"]) if "size" in r else hi - lo
++        if size < hi - lo:
++            raise ValueError(f"relocation {i}: size below hi - lo")
++        _SIZES[r.get("name") or f"r{i}"] = size
++        rng.append((lo, hi, to, r.get("name") or f"r{i}", base))
++    rng.sort()
++    for a, b in zip(rng, rng[1:]):
++        if a[1] > b[0]:
++            raise ValueError(f"relocations {a[3]} and {b[3]} overlap")
++    tg = sorted((to, to + _SIZES[n], n) for lo, hi, to, n, _b in rng)
++    for a, b in zip(tg, tg[1:]):
++        if a[1] > b[0]:
++            raise ValueError(f"relocation targets {a[2]} and {b[2]} overlap")
++    _RANGES = rng
++    _COUNTS.clear()
++    _SITES.clear()
++    return len(rng)
++
++
++def active():
++    return bool(_RANGES)
++
++
++def _hit(name, insn_addr, kind, old, new):
++    _COUNTS[name] = _COUNTS.get(name, 0) + 1
++    if insn_addr is not None:
++        _SITES.append((insn_addr, kind, old, new, name))
++    return new
++
++
++def remap(value, insn_addr=None, kind="imm"):
++    """The relocated address for ``value``, or ``value`` itself."""
++    if not _RANGES or value is None or value < 0:
++        return value
++    for lo, hi, to, name, _base in _RANGES:
++        if lo <= value < hi:
++            return _hit(name, insn_addr, kind, value, to + (value - lo))
++    return value
++
++
++def remap_rel(disp, insn_addr=None):
++    """A displacement off a register: rewritten only for entries with a
++    ``base`` whose object-relative range holds it."""
++    if not _RANGES or disp is None or disp < 0:
++        return disp
++    for lo, hi, to, name, base in _RANGES:
++        if base is not None and lo - base <= disp < hi - base:
++            return _hit(name, insn_addr, "rel", disp, disp + (to - lo))
++    return disp
++
++
++def remap_end(value, insn_addr=None):
++    """A compared constant equal to an array's old end: the new end."""
++    if not _RANGES or value is None:
++        return value
++    for lo, hi, to, name, _base in _RANGES:
++        if value == hi:
++            return _hit(name, insn_addr, "end", value, to + _SIZES[name])
++    return value
++
++
++def summary():
++    return dict(_COUNTS)
++
++
++def write_report(path):
++    """One line a rewrite: the instruction, the operand kind, old -> new."""
++    seen = set()
++    with open(path, "w", encoding="utf-8") as f:
++        for addr, kind, old, new, name in sorted(_SITES):
++            key = (addr, kind, old)
++            if key in seen:      # an instruction decoded twice (two bodies)
++                continue
++            seen.add(key)
++            f.write(f"0x{addr:08X} {kind:4} 0x{old:08X} -> 0x{new:08X} {name}\n")
++    return len(seen)
+diff --git a/tools/recomp/test_relocate.py b/tools/recomp/test_relocate.py
+new file mode 100644
+index 0000000..1bc4dee
+--- /dev/null
++++ b/tools/recomp/test_relocate.py
+@@ -0,0 +1,87 @@
++"""Tests for lift-time relocation (relocate.py, --relocate)."""
++
++import json
++import os
++import tempfile
++import unittest
++
++from capstone import Cs, CS_ARCH_X86, CS_MODE_32
++
++from . import relocate
++from .disasm import Disassembler
++
++
++def _cfg(entries):
++    fd, path = tempfile.mkstemp(suffix=".json")
++    with os.fdopen(fd, "w") as f:
++        json.dump({"relocations": entries}, f)
++    return path
++
++
++def _ops(code, addr=0x1000):
++    d = Disassembler()
++    cs = Cs(CS_ARCH_X86, CS_MODE_32)
++    cs.detail = True
++    insn = next(cs.disasm(code, addr))
++    return d._decode_instruction(insn).operands
++
++
++HUMANS = {"name": "humans", "lo": "0x0073A1D0", "hi": "0x0073F190",
++          "to": "0x00780000", "size": "0x9F80", "base": "0x0060EA00"}
++
++
++class RelocateTest(unittest.TestCase):
++    def tearDown(self):
++        relocate._RANGES = []
++        relocate._SIZES.clear()
++
++    def load(self, entries):
++        path = _cfg(entries)
++        try:
++            return relocate.load(path)
++        finally:
++            os.unlink(path)
++
++    def test_off_is_identity(self):
++        # mov eax, 0x73a1d0
++        self.assertEqual(_ops(bytes.fromhex("b8d0a17300"))[1].imm, 0x73A1D0)
++
++    def test_immediate_and_slot_field(self):
++        self.load([HUMANS])
++        self.assertEqual(_ops(bytes.fromhex("b8d0a17300"))[1].imm, 0x780000)
++        # mov eax, 0x73c9b0 (slot 1)
++        self.assertEqual(_ops(bytes.fromhex("b8b0c97300"))[1].imm, 0x7827E0)
++
++    def test_absolute_displacement(self):
++        self.load([HUMANS])
++        # mov eax, dword ptr [0x73a1d0 + 0x10dc]
++        op = _ops(bytes.fromhex("a1acb27300"))[1]
++        self.assertEqual(op.mem_disp, 0x780000 + 0x10DC)
++
++    def test_object_relative_displacement(self):
++        self.load([HUMANS])
++        # mov dword ptr [esi + 0x12b7d0], 0x3b11a0
++        op = _ops(bytes.fromhex("c786d0b71200a0113b00"))[0]
++        self.assertEqual(op.mem_base, "esi")
++        self.assertEqual(op.mem_disp, 0x780000 - 0x60EA00)
++
++    def test_object_relative_never_an_immediate(self):
++        self.load([HUMANS])
++        # push 0x12b7d0 stays: such a value is also a code address
++        self.assertEqual(_ops(bytes.fromhex("68d0b71200"))[0].imm, 0x12B7D0)
++
++    def test_loop_end_grows(self):
++        self.load([HUMANS])
++        # cmp esi, 0x73f190
++        self.assertEqual(_ops(bytes.fromhex("81fe90f17300"))[1].imm, 0x789F80)
++        # mov esi, 0x73f190 (the next array's base) stays
++        self.assertEqual(_ops(bytes.fromhex("be90f17300"))[1].imm, 0x73F190)
++
++    def test_overlap_rejected(self):
++        with self.assertRaises(ValueError):
++            self.load([HUMANS, dict(HUMANS, name="b", lo="0x0073A1E0",
++                                    hi="0x0073A1F0", to="0x00800000")])
++
++
++if __name__ == "__main__":
++    unittest.main()
+-- 
+2.43.0
+

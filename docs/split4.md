@@ -8,6 +8,20 @@ Status: steps 1 and 2 of the plan below. The human racers, setup records
 and player cameras are relocated and two players play as before; there is
 no four-player stage yet.
 
+## Building this branch
+
+The branch needs two toolkit changes (the `--relocate` lift option and the
+runtime's block after the image). They are kept here, in
+`patches/xboxrecomp-4p.patch`; apply them to the toolkit checkout
+(`xenophobentx/xboxrecomp`, tag `takedawn-0.3.1`) before building:
+
+    git clone -b takedawn https://github.com/xenophobentx/xboxrecomp ../xboxrecomp
+    git -C ../xboxrecomp checkout takedawn-0.3.1
+    patches/apply-toolkit.sh
+    XBOXRECOMP_DIR=../xboxrecomp ./regen.sh --disasm
+
+then build as in [building.md](building.md).
+
 ## How the title holds its players
 
 All addresses NTSC-U.
