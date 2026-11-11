@@ -511,3 +511,21 @@ void sub_001AA100(void) { split4_world_load(sub_001AA100_gen); }   /* NTSC-U onl
 void sub_001A9930(void) { split4_world_ctor(sub_001A9930_gen); }   /* NTSC-U only */
 void sub_00017450(void) { split4_stage_start(sub_00017450_gen); }  /* NTSC-U only */
 void sub_000209A0(void) { split4_stage_setup(sub_000209A0_gen); }  /* NTSC-U only */
+extern void sub_0002ECC0_gen(void);
+extern void sub_0002F330_gen(void);
+extern void sub_0002F480_gen(void);
+extern void sub_001674B0_gen(void);
+extern void sub_001AE2F0_gen(void);
+void sub_0002ECC0(void) { split4_views_create(sub_0002ECC0_gen); }  /* NTSC-U only */
+void sub_0002F330(void) { split4_view_select(sub_0002F330_gen); }   /* NTSC-U only */
+void sub_0002F480(void) { split4_split_build(sub_0002F480_gen); }   /* NTSC-U only */
+void sub_001674B0(void) { split4_camera_bind(sub_001674B0_gen); }   /* NTSC-U only */
+void sub_001AE2F0(void) { split4_render_views(sub_001AE2F0_gen); }  /* NTSC-U only */
+extern void sub_001AA920_gen(void);
+void sub_001AA920(void) { split4_stream_ready(sub_001AA920_gen); }  /* NTSC-U only */
+extern void sub_00053D20_gen(void);
+void sub_00053D20(void) { split4_hud_state(sub_00053D20_gen); }     /* NTSC-U only */
+extern void sub_00053700_gen(void);
+void sub_00053700(void) { split4_hud_layout(sub_00053700_gen); }    /* NTSC-U only */
+extern void sub_001B4230_gen(void);
+void sub_001B4230(void) { split4_camera_mode(sub_001B4230_gen); }   /* NTSC-U only */

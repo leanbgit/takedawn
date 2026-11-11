@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stddef.h>
 #include <stdlib.h>
+#include <string.h>
 
 extern ptrdiff_t g_xbox_mem_offset;
 #define S4_M8(va)  (*(const uint8_t *)((uintptr_t)g_xbox_mem_offset + (uint32_t)(va)))
@@ -65,6 +66,20 @@ void split4_log(uint32_t flip)
                 S4_M16(h + 0x10D0u), S4_M8(h + 0x27D8u),
                 S4_MF(h + 0x40u), S4_MF(h + 0x44u), S4_MF(h + 0x48u));
     }
+    /* Each car's track section and view (physics +0x216, +0x217) and each
+     * view's streamed-section window (world + 0x12ADC8, relocated: its first
+     * word, -1 when nothing streams for it). */
+    fprintf(s_log, " | sec");
+    for (k = 0; k < SPLIT4_MAX_PLAYERS; k++)
+        fprintf(s_log, " %d/%d", (int8_t)S4_M8(0x007A0000u + k * 0x4AD0u + 0x216u),
+                (int8_t)S4_M8(0x007A0000u + k * 0x4AD0u + 0x217u));
+    /* The track streamer (world + 0x4DE0): +0x363B9 two foci (players 1
+     * and 2), +0x363BB on, +0x363BD. */
+    fprintf(s_log, " | strm %u %u %u", S4_M8(0x006137E0u + 0x363B9u),
+            S4_M8(0x006137E0u + 0x363BBu), S4_M8(0x006137E0u + 0x363BDu));
+    fprintf(s_log, " | view");
+    for (k = 0; k < SPLIT4_MAX_PLAYERS; k++)
+        fprintf(s_log, " %d", (int32_t)S4_M32(0x00793000u + k * 0x1CCu));
     fputc('\n', s_log);
 }
 
@@ -95,12 +110,24 @@ extern RECOMP_TLS uint32_t g_eax, g_ecx, g_edx, g_esi, g_esp;
 #define S4_SETUP_SIZE    0x24u
 #define S4_CAM           0x0078A100u   /* relocated player cameras, 0xC50 each */
 #define S4_CAM_SIZE      0x0C50u
+#define S4_HUD           0x0054F900u   /* the HUD manager, its player records first */
+#define S4_HUD_REC       0x70u
+#define S4_PHYS          0x007A0000u   /* relocated human physics objects */
+#define S4_PHYS_SIZE     0x4AD0u
+#define S4_WINDOW        0x00793000u   /* relocated stream windows (viewdata) */
+#define S4_WINDOW_SIZE   0x1CCu
+
+static int s4_four_racing(void);
+static int s4_skip(const char *part);
 #define S4_CAR_AI        0x27D8u       /* byte: the AI drives this car */
 #define S4_CAR_PHASE     0x134Cu       /* 2: in play */
 #define S4_CAR_AI_RESET  0x19D0u
 #define S4_CAR_DRIVER    0x1A00u
 
 extern void sub_00015900(void);        /* the player camera's constructor (ecx) */
+extern void sub_001673E0(void);        /* the player camera's init (ecx; eax the player) */
+extern void sub_00167940(void);        /* a player's cameras' frame (esi the camera; time, ret 4) */
+static void s4_vcall(uint32_t obj, uint32_t off);
 extern void sub_001705F0(void);        /* a racer's init (esi) */
 extern void sub_001B4230(void);        /* the player camera's reset, vtable +0xC (ecx; mode, 0) */
 extern void sub_00179760(void);        /* the AI driver's route reset (eax) */
@@ -189,6 +216,19 @@ void split4_stage_start(void (*gen)(void))
                 sub_00015900();
                 g_eax = a; g_ecx = c; g_edx = d; g_esp = sp;
             }
+            /* The app's init (sub_00015A60) gives cameras 0 and 1 their
+             * player (sub_001673E0: ecx the camera, eax the index, at
+             * + 0xC30). Cameras 2 and 3 would stay player 0's and take view
+             * 0 at their bind; they get theirs, once. */
+            if (S4_M32(cam + 0xC30u) != k) {
+                uint32_t a = g_eax, b = g_ebx, c = g_ecx, d = g_edx, si = g_esi, di = g_edi, sp = g_esp;
+                g_ecx = cam;
+                g_eax = k;
+                PUSH32(g_esp, 0);
+                sub_001673E0();
+                g_eax = a; g_ebx = b; g_ecx = c; g_edx = d; g_esi = si; g_edi = di; g_esp = sp;
+                fprintf(stderr, "[SPLIT4] camera %u set up for player %u\n", k, S4_M32(cam + 0xC30u));
+            }
         }
         fprintf(stderr, "[SPLIT4] stage start: %u humans, %u AIs\n",
                 S4_M32(mod + S4_STAGE_HUMANS), S4_M32(mod + S4_STAGE_AIS));
@@ -213,6 +253,132 @@ void split4_stage_setup(void (*gen)(void))
         S4_W8(r + 0x20) = S4_M8(S4_SETUP + 0x20);
         S4_W8(r + 0x18) = (uint8_t)k;          /* the pad's port */
     }
+}
+
+/* The HUD's per-player records (0x54F900 + player x 0x70, two of them; the
+ * manager's own fields follow at + 0xE0) take a state through sub_00053D20
+ * (edi the record, eax the state) from five places that index them by the
+ * player (sub_00027920, sub_00027AD0, sub_0018C510, sub_0018C7D0,
+ * sub_0018C820). Players 3 and 4 would write
+ * into the layout data after the two records, which player 1's and 2's
+ * panels read (0x54FA00 / 0x54FA30 / 0x54FA50): their call is skipped
+ * (a plain ret). The HUD draws its two panels only (the manager's count,
+ * + 0x170, sub_00053700). */
+void split4_hud_state(void (*gen)(void))
+{
+    uint32_t r = g_edi;
+    if (split4_enabled() && r >= S4_HUD + 2u * S4_HUD_REC && r < S4_HUD + 4u * S4_HUD_REC) {
+        g_esp += 4u;                             /* its ret */
+        return;
+    }
+    gen();
+}
+
+/* sub_00053700 (eax the HUD manager, ecx the panel count): with two, the
+ * title's split layout, panel 0 the top half and panel 1 the bottom half,
+ * each a rectangle (+0x48 x0, +0x4C y0, +0x50 x1, +0x54 y1; panel 1's at
+ * + 0x70) with the title's margins (the gap at the middle is the top
+ * margin). With four racing, panels 0 and 1 become the top-left and
+ * top-right quarters, players 1's and 2's views, with the same gap at the
+ * vertical middle. Players 3 and 4 have no panel (the manager has two). */
+void split4_hud_layout(void (*gen)(void))
+{
+    uint32_t m = g_eax, n = g_ecx;
+    float x0, y0, x1, ym, g, xm;
+    gen();
+    if (n != 2u || m != S4_HUD || !s4_four_racing() || s4_skip("hud"))
+        return;
+    x0 = S4_MF(m + 0x48u);
+    y0 = S4_MF(m + 0x4Cu);
+    x1 = S4_MF(m + 0x50u);
+    g = (S4_MF(m + 0x70u + 0x4Cu) - S4_MF(m + 0x54u)) * 0.5f;
+    ym = S4_MF(m + 0x54u) + g;
+    xm = (x0 + x1) * 0.5f;
+    S4_WF(m + 0x48u) = x0;       S4_WF(m + 0x4Cu) = y0;
+    S4_WF(m + 0x50u) = xm - g;   S4_WF(m + 0x54u) = ym - g;
+    S4_WF(m + 0xB8u) = xm + g;   S4_WF(m + 0xBCu) = y0;
+    S4_WF(m + 0xC0u) = x1;       S4_WF(m + 0xC4u) = ym - g;
+}
+
+/* The player camera's mode switch (sub_001B4230, the cameras' vtable + 0xC:
+ * ecx the camera, the mode and a target on the stack, ret 8). The race's
+ * global switches (the intro, the start, the finish, the replays) name the
+ * two cameras one after the other, camera 0 then camera 1, from these
+ * places (their return addresses); cameras 2 and 3 take camera 1's switch
+ * there too. A switch for one player (a crash, a takedown) indexes its
+ * camera and is left alone. The world load's (0x1AA154) is
+ * split4_world_load's. */
+static const uint32_t s4_cam_sites[] = {
+    0x000247ACu, 0x0002489Du, 0x000248B6u, 0x00024926u, 0x00026014u,
+    0x000261C9u, 0x00026968u, 0x00026A5Eu, 0x00026CFCu, 0x0002723Fu,
+    0x00072F48u,
+};
+
+void split4_camera_mode(void (*gen)(void))
+{
+    uint32_t cam = g_ecx, sp = g_esp, ret = S4_M32(sp);
+    uint32_t mode = S4_M32(sp + 4u), arg = S4_M32(sp + 8u);
+    unsigned i, k;
+    gen();
+    if (cam != S4_CAM + S4_CAM_SIZE || !s4_four_racing())
+        return;
+    for (i = 0; i < sizeof s4_cam_sites / sizeof s4_cam_sites[0]; i++)
+        if (s4_cam_sites[i] == ret)
+            break;
+    if (i == sizeof s4_cam_sites / sizeof s4_cam_sites[0])
+        return;
+    for (k = 2; k < SPLIT4_MAX_PLAYERS; k++) {
+        uint32_t a = g_eax, b = g_ebx, c = g_ecx, d = g_edx, si = g_esi, di = g_edi, s2 = g_esp;
+        g_ecx = S4_CAM + k * S4_CAM_SIZE;
+        PUSH32(g_esp, arg);
+        PUSH32(g_esp, mode);
+        PUSH32(g_esp, 0);
+        gen();
+        g_eax = a; g_ebx = b; g_ecx = c; g_edx = d; g_esi = si; g_edi = di; g_esp = s2;
+    }
+}
+
+/* config/patches.json s4_cam_frame: the app's frame updates the players'
+ * cameras 0 and 1 by name (sub_000170B0); cameras 2 and 3 are updated
+ * after them, with the frame's time (app + 0x2E210). Without it they keep
+ * the pose they were built with and views 3 and 4 look at the sky. */
+static void split4_cam_frame(void)
+{
+    unsigned k;
+    float dt;
+    if (!s4_four_racing())
+        return;
+    dt = S4_MF(g_edi + 0x2E210u);
+    for (k = 2; k < SPLIT4_MAX_PLAYERS; k++) {
+        uint32_t a = g_eax, b = g_ebx, c = g_ecx, d = g_edx, si = g_esi, di = g_edi, sp = g_esp;
+        g_esi = S4_CAM + k * S4_CAM_SIZE;
+        g_esp -= 8u;
+        S4_W32(g_esp) = 0;                         /* the return address */
+        S4_WF(g_esp + 4u) = dt;                    /* its one argument, ret 4 */
+        sub_00167940();
+        g_eax = a; g_ebx = b; g_ecx = c; g_edx = d; g_esi = si; g_edi = di; g_esp = sp;
+    }
+}
+
+/* s4_cam_reset: sub_00016D00 resets cameras 0 and 1 by name (vtable + 4);
+ * cameras 2 and 3 too. */
+static void split4_cam_reset(void)
+{
+    unsigned k;
+    if (!s4_four_racing())
+        return;
+    for (k = 2; k < SPLIT4_MAX_PLAYERS; k++)
+        s4_vcall(S4_CAM + k * S4_CAM_SIZE, 4u);
+}
+
+/* s4_env_view: the object at 0x60E040 keeps an entry per view (+ 0xB0,
+ * 0x40 each) for two views, its current view (+ 0x130) right after them.
+ * Views 2 and 3 take entries 0 and 1. */
+static void split4_env_view(void)
+{
+    uint32_t v = S4_M32(0x0060E170u);
+    if (v >= 2u && v < SPLIT4_MAX_PLAYERS)
+        S4_W32(0x0060E170u) = v & 1u;
 }
 
 /* The car update mark (ap_update, sub_0018C510, esi the car): with
@@ -243,9 +409,55 @@ static void split4_car_update(void)
             (car - SPLIT4_HUMAN) / SPLIT4_HUMAN_SIZE + 1);
 }
 
+/* The track streamer's windows (config/patches.json s4_stream_*): the
+ * world's load starts window 1 (around player 2) only when the human count
+ * is 2, the esi it compares with. With more, esi becomes the count for the
+ * two compares and 2 again after. Players 3 and 4 look their track up in
+ * window 0 or 1, as the title has them (their view byte: 1, the fallback
+ * 1 - view when the car is outside it). */
+static int split4_more(void)
+{
+    return S4_M32(SPLIT4_WORLD + 0x12B7C0u) > 2u;
+}
+
+static void split4_stream_cmp(void)
+{
+    uint32_t step = S4_M32(SPLIT4_WORLD + 0x144384u);   /* the load step */
+    if (split4_more() && (step == 0x10u || step == 0x11u))
+        g_esi = S4_M32(SPLIT4_WORLD + 0x12B7C0u);
+}
+
+static void split4_stream_end(void)
+{
+    g_esi = 2;
+}
+
+/* sub_001AA920 (esi the world): the load waits for window 0 and, with two
+ * humans (`cmp [0x73A1C0], 2`), window 1. With more the count reads 2 for
+ * the call. */
+void split4_stream_ready(void (*gen)(void))
+{
+    uint32_t n = S4_M32(SPLIT4_WORLD + 0x12B7C0u);
+    if (!split4_enabled() || n <= 2u) {
+        gen();
+        return;
+    }
+    S4_W32(SPLIT4_WORLD + 0x12B7C0u) = 2;
+    gen();
+    S4_W32(SPLIT4_WORLD + 0x12B7C0u) = n;
+}
+
 void split4_start(void)
 {
-    if (split4_enabled() && split4_ai34() && !recomp_env_on(RENV_AUTOPILOT))
+    if (!split4_enabled())
+        return;
+    recomp_patch_on_mark("s4_stream_a", split4_stream_cmp);
+    recomp_patch_on_mark("s4_stream_b", split4_stream_cmp);
+    recomp_patch_on_mark("s4_stream_end", split4_stream_end);
+    recomp_patch_on_mark("s4_cam_frame", split4_cam_frame);
+    recomp_patch_on_mark("s4_cam_reset", split4_cam_reset);
+    recomp_patch_on_mark("s4_env_view", split4_env_view);
+    if (split4_ai34() && !recomp_env_on(RENV_AUTOPILOT))
         recomp_patch_on_mark("ap_update", split4_car_update);
 }
 
@@ -263,5 +475,257 @@ void split4_guest_chain(void)
             fprintf(stderr, "         guest [esp+%u] %08X\n", k * 4u, v);
             shown++;
         }
+    }
+}
+
+/* ---- Four views (step 3) ------------------------------------------------
+ *
+ * The render manager (0x4D6170) holds the title's views: 2D at +0x310 and the
+ * players' at +0x90 and +0x130 (0xA0 each), with an effects record each at
+ * +0x1D0 and +0x270 (sub_00179FD0 fills them). sub_0002F330 makes one current
+ * by a mode (0 the 2D view, 1 and 2 the players'): the manager's +0x3B0 and
+ * +0x3B4 (0x4D6520 / 0x4D6524), and begins the view's RwCamera. The stage
+ * render draws view i as mode i + 1 (sub_001AE340 -> sub_0003D9E0).
+ *
+ * Players 3 and 4 get views and effects records of their own in the block
+ * after the image (the manager's next slots are the effects records), built
+ * as the title builds its own (sub_0002ECC0 -> sub_001C8C10), made current as
+ * modes 3 and 4, cut as quarters of the frame by the split builder, prepared
+ * and drawn after the title's two (sub_001AE2F0). */
+
+#define S4_MGR          0x004D6170u
+#define S4_VIEW34       0x007B3000u   /* views of players 3 and 4, 0xA0 each */
+#define S4_FX34         0x007B3200u   /* their effects records, 0xA0 each */
+#define S4_VIEW_SIZE    0xA0u
+
+extern RECOMP_TLS uint32_t g_ebx, g_edi;
+extern void sub_001C8C10(void);        /* a view's set-up (esi the view; one arg, ret 4) */
+extern void sub_001D9290(void);        /* RwCameraBeginUpdate (cdecl) */
+extern void sub_001DE810(void);        /* RwRasterSubRaster (cdecl: sub, parent, rect) */
+extern void sub_001AE340(void);        /* the stage render of one view (ebx the view; world, ret 4) */
+extern void sub_001C8A60(void);        /* a view's matrices from its player camera (edi) */
+extern void sub_00179FD0(void);        /* a view's effects record (eax the player, ebx the view; cdecl fx) */
+extern void sub_0002F380(void);        /* the single-view builder (edi the manager; index, ret 4) */
+
+/* BO3_SPLIT4_SKIP=<names>: development switch, the listed parts of the
+ * four-view code stay off (views, select, quad, bind, render). */
+static int s4_skip(const char *part)
+{
+    const char *v = getenv("BO3_SPLIT4_SKIP");
+    return v && strstr(v, part) != NULL;
+}
+
+static uint32_t s4_view(unsigned k)
+{
+    return k < 2 ? S4_MGR + 0x90u + k * S4_VIEW_SIZE : S4_VIEW34 + (k - 2) * S4_VIEW_SIZE;
+}
+
+static uint32_t s4_fx(unsigned k)
+{
+    return k < 2 ? S4_MGR + 0x1D0u + k * S4_VIEW_SIZE : S4_FX34 + (k - 2) * S4_VIEW_SIZE;
+}
+
+static int s4_four_racing(void)
+{
+    return split4_enabled() && stage_is_2p() &&
+           S4_M32(SPLIT4_WORLD + 0x12B7C0u) == SPLIT4_MAX_PLAYERS;
+}
+
+/* sub_0002ECC0 (once, the manager on the stack): the title's views, then
+ * those of players 3 and 4 the same way. */
+void split4_views_create(void (*gen)(void))
+{
+    unsigned k;
+    gen();
+    if (!split4_enabled() || s4_skip("views"))
+        return;
+    for (k = 2; k < SPLIT4_MAX_PLAYERS; k++) {
+        uint32_t a = g_eax, bx = g_ebx, c = g_ecx, d = g_edx, si = g_esi, di = g_edi, sp = g_esp;
+        g_esi = s4_view(k);
+        g_ebx = 0;                     /* raster width and height: 0, a sub-raster */
+        g_edi = 0;                     /*  of the frame (sub_0002ECC0 does the same) */
+        PUSH32(g_esp, 0);              /* its argument (the title passes 0) */
+        PUSH32(g_esp, 0);              /* the return address its ret 4 takes */
+        sub_001C8C10();
+        g_eax = a; g_ebx = bx; g_ecx = c; g_edx = d; g_esi = si; g_edi = di; g_esp = sp;
+        S4_WF(s4_view(k) + 0x90u) = 1.0f;
+    }
+    fprintf(stderr, "[SPLIT4] views for players 3 and 4 built (0x%08X, 0x%08X)\n",
+            s4_view(2), s4_view(3));
+}
+
+/* sub_0002F330 (eax the manager, ecx the mode): modes 3 and 4 are the views
+ * of players 3 and 4. */
+void split4_view_select(void (*gen)(void))
+{
+    uint32_t mgr = g_eax, mode = g_ecx;
+    if (split4_enabled() && !s4_skip("select") && mgr == S4_MGR && (mode == 3 || mode == 4)) {
+        uint32_t v = s4_view(mode - 1), sp;
+        S4_W32(mgr + 0x3B0u) = v;
+        S4_W32(mgr + 0x3B4u) = s4_fx(mode - 1);
+        sp = g_esp;
+        PUSH32(g_esp, S4_M32(v + 0x58u));   /* its RwCamera */
+        PUSH32(g_esp, 0);
+        sub_001D9290();
+        g_ecx = S4_M32(v + 0x58u);           /* the title's pop ecx */
+        g_esp = sp + 4u;                     /* the title's ret: its return address */
+        return;
+    }
+    gen();
+}
+
+/* sub_0002F480 (esi the manager): the split views. With four racing, four
+ * quarters: each view a sub-raster of the frame and depth buffers (+0x370,
+ * +0x374), its size at +0x78 / +0x7C, the frame's +0x390 at +0x80, and the
+ * aspect and scale a full-screen view has (+0x74, +0x70: taken from
+ * sub_0002F380's view 0, so the widescreen setting's patches hold). */
+void split4_split_build(void (*gen)(void))
+{
+    uint32_t mgr = g_esi, w, h, sp, rect, sp0 = g_esp;
+    float aspect, scale;
+    unsigned k;
+
+    if (!s4_four_racing() || mgr != S4_MGR || s4_skip("quad")) {
+        gen();
+        return;
+    }
+    if (s4_skip("full")) {
+        /* sub_0002F380's values for a full-screen view, without the call */
+        int wide = S4_M8(mgr + 0xDu) != 0;
+        aspect = wide ? 16.0f / 9.0f : 4.0f / 3.0f;
+        scale = wide ? 1.2f : 1.0f;
+    } else {   /* view 0 full screen, as the title's one-view stage does */
+        uint32_t a = g_eax, c = g_ecx, d = g_edx, di = g_edi;
+        sp = g_esp;
+        g_edi = mgr;
+        PUSH32(g_esp, 0);
+        PUSH32(g_esp, 0);
+        sub_0002F380();
+        g_eax = a; g_ecx = c; g_edx = d; g_edi = di; g_esp = sp;
+        scale = S4_MF(s4_view(0) + 0x70u);
+        aspect = S4_MF(s4_view(0) + 0x74u);
+    }
+    w = S4_M32(mgr + 0x0u);
+    h = S4_M32(mgr + 0x4u);
+    for (k = 0; k < SPLIT4_MAX_PLAYERS; k++) {
+        uint32_t v = s4_view(k), x = (k & 1u) ? w / 2u : 0u, y = (k & 2u) ? h / 2u : 0u;
+        uint32_t qw = (k & 1u) ? w - w / 2u : w / 2u, qh = (k & 2u) ? h - h / 2u : h / 2u;
+        uint32_t a = g_eax, c = g_ecx, d = g_edx;
+        sp = g_esp;
+        g_esp -= 0x20u;
+        rect = g_esp + 0x10u;
+        S4_W32(rect + 0x0u) = x;
+        S4_W32(rect + 0x4u) = y;
+        S4_W32(rect + 0x8u) = qw;
+        S4_W32(rect + 0xCu) = qh;
+        PUSH32(g_esp, rect);
+        PUSH32(g_esp, S4_M32(mgr + 0x370u));
+        PUSH32(g_esp, S4_M32(v + 0x60u));
+        PUSH32(g_esp, 0);
+        sub_001DE810();
+        if (S4_M32(mgr + 0x374u)) {
+            g_esp = sp - 0x20u;
+            PUSH32(g_esp, rect);
+            PUSH32(g_esp, S4_M32(mgr + 0x374u));
+            PUSH32(g_esp, S4_M32(v + 0x64u));
+            PUSH32(g_esp, 0);
+            sub_001DE810();
+        }
+        g_eax = a; g_ecx = c; g_edx = d; g_esp = sp;
+        S4_W32(v + 0x78u) = qw;
+        S4_W32(v + 0x7Cu) = qh;
+        S4_W32(v + 0x80u) = S4_M32(mgr + 0x390u);
+        S4_WF(v + 0x74u) = aspect;
+        S4_WF(v + 0x70u) = scale;
+    }
+    S4_W32(mgr + 0x50u) = 2;
+    g_esp = sp0 + 4u;                        /* the title's ret: its return address */
+    fprintf(stderr, "[SPLIT4] four quarters of %ux%u\n", w, h);
+}
+
+/* A guest virtual call without stack arguments: ecx the object, the
+ * function at its vtable + off. Registers and esp as they were. */
+static void s4_vcall(uint32_t obj, uint32_t off)
+{
+    uint32_t a = g_eax, b = g_ebx, c = g_ecx, d = g_edx, si = g_esi, di = g_edi, sp = g_esp;
+    recomp_func_t fn = recomp_lookup(S4_M32(S4_M32(obj) + off));
+    if (fn) {
+        g_ecx = obj;
+        PUSH32(g_esp, 0);                       /* its return address */
+        fn();
+    }
+    g_eax = a; g_ebx = b; g_ecx = c; g_edx = d; g_esi = si; g_edi = di; g_esp = sp;
+}
+
+/* A player camera's view link (sub_001674B0's end): the camera's
+ * sub-object at + 0x250 and the view point at each other (view + 0x68,
+ * sub-object + 0x40), then the sub-object's vtable + 8 sets the view's
+ * RwCamera up from it. */
+static void s4_link(uint32_t cam, unsigned view)
+{
+    uint32_t sub = cam + 0x250u, v = s4_view(view);
+    S4_W32(v + 0x68u) = sub;
+    S4_W32(sub + 0x40u) = v;
+    s4_vcall(sub, 8u);
+}
+
+/* sub_001674B0 (esi a player camera): binds the camera to its view; the
+ * title knows two (player 0 to view 0, any other to view 1, which it then
+ * sets up from that camera). Players 3 and 4 are linked to theirs and set
+ * up, and view 1 is given back to player 2's camera. */
+void split4_camera_bind(void (*gen)(void))
+{
+    uint32_t cam = g_esi, k;
+    gen();
+    if (!split4_enabled() || s4_skip("bind"))
+        return;
+    k = S4_M32(cam + 0xC30u);
+    if (k < 2 || k >= SPLIT4_MAX_PLAYERS)
+        return;
+    s4_link(cam, k);
+    s4_link(S4_CAM + S4_CAM_SIZE, 1);
+}
+
+/* sub_001AE2F0 (esi the world): the two-player stage draws views 0 and 1;
+ * with four racing, views 2 and 3 are prepared (as sub_00020B30 prepares the
+ * first two) and drawn the same way. */
+void split4_render_views(void (*gen)(void))
+{
+    uint32_t world = g_esi;
+    unsigned k;
+    gen();
+    if (!s4_four_racing() || s4_skip("render"))
+        return;
+    for (k = 2; k < SPLIT4_MAX_PLAYERS; k++) {
+        uint32_t v = s4_view(k), human = SPLIT4_HUMAN + k * SPLIT4_HUMAN_SIZE;
+        uint32_t a = g_eax, b = g_ebx, c = g_ecx, d = g_edx, si = g_esi, di = g_edi, sp = g_esp;
+        /* The stage render draws the track sections of the view's stream
+         * window (world + 0x12ADC8 + view x 0x1CC). Only windows 0 and 1
+         * stream (players 1 and 2); the car's own view byte (physics + 0x217:
+         * 0 or 1, the window it finds its ground in) says which one it is in,
+         * and view k draws from a copy of it. */
+        {
+            uint32_t w = S4_M8(S4_PHYS + k * S4_PHYS_SIZE + 0x217u) & 1u;
+            memcpy((uint8_t *)(uintptr_t)g_xbox_mem_offset + S4_WINDOW + k * S4_WINDOW_SIZE,
+                   (const uint8_t *)(uintptr_t)g_xbox_mem_offset + S4_WINDOW + w * S4_WINDOW_SIZE,
+                   S4_WINDOW_SIZE);
+        }
+        g_edi = v;
+        PUSH32(g_esp, 0);
+        sub_001C8A60();
+        g_esp = sp;
+        S4_WF(v + 0x90u) = 1.0f / S4_MF(v + 0x48u);
+        g_eax = human;
+        g_ebx = v;
+        PUSH32(g_esp, s4_fx(k));
+        PUSH32(g_esp, 0);
+        sub_00179FD0();
+        g_esp = sp;
+        g_ebx = k;
+        g_esi = world;
+        PUSH32(g_esp, world);
+        PUSH32(g_esp, 0);
+        sub_001AE340();
+        g_eax = a; g_ebx = b; g_ecx = c; g_edx = d; g_esi = si; g_edi = di; g_esp = sp;
     }
 }

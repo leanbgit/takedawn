@@ -102,8 +102,8 @@
     {
       "va": "0x001A2265",
       "from": "0x0073F190",
-      "to": "0x007827C0",
-      "note": "The track streamer's focus loop (sub_001A20F0) walks the human slots into two-entry locals (esp+0x28 words, esp+0x30 pointers, the count 2 at esp+0x2C between them): it stays at two foci, players 1 and 2 (the end of slot 1 in the relocated block). Known limitation: track around players 3 and 4 streams only as far as it does around 1 and 2."
+      "to": "0x00784FC0",
+      "note": "The track streamer's focus loop (sub_001A20F0) walks the human slots into two-entry locals (esp+0x28 words, esp+0x30 pointers, the count 2 at esp+0x2C between them): it stays at two foci, players 1 and 2 (the end of slot 2 in the relocated block: 0x780000 + 2 x 0x27E0). Known limitation: track around players 3 and 4 streams only as far as it does around 1 and 2."
     }
   ]
 }

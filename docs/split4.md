@@ -102,17 +102,48 @@ and the two player cameras move to a four-slot block.
      the world's load step 1 (camera reset for 3 and 4), the stage's start
      (four humans, at most two AIs, cameras built), the two-player set-up
      (setup records for pads 3 and 4).
+   - four views (`split4.c`, the four-view part): views 3 and 4 built like
+     the title's two (`sub_0002ECC0`), the split builder makes four quarter
+     sub-rasters (`sub_0002F480`), the view select takes modes 3 and 4
+     (`sub_0002F330`), the stage render draws views 2 and 3 after the
+     title's two (`sub_001AE2F0`);
+   - cameras 2 and 3: their player index (`sub_001673E0`, which the app's
+     init runs for 0 and 1 only; without it they bind to view 0), their own
+     view at the bind (`sub_001674B0`: link and the sub-object's vtable + 8
+     set-up), and camera 1's global mode switches (intro, start, finish,
+     replays: eleven unrolled call sites of `sub_001B4230`) repeated for
+     them, as are the app's per-frame camera update (`sub_000170B0` names
+     cameras 0 and 1: mark `s4_cam_frame`) and its camera reset
+     (`sub_00016D00`: mark `s4_cam_reset`);
+   - track streaming: the world's load starts stream window 1 (around
+     player 2) only for exactly two humans (`sub_001AA100` steps 0x10 and
+     0x11, `cmp [count], esi`; marks `s4_stream_*` in `config/patches.json`)
+     and waits for it likewise (`sub_001AA920`). Without window 1, every car
+     that looks its ground up there (player 2's; 3's and 4's, which the
+     title gives view 1) fell through the track. The streamer's focus loop
+     end (`immediates` 0x1A2265) is the end of slot 1 (0x784FC0);
+   - views 3 and 4 draw the track of the window their car is in (a copy of
+     window 0 or 1, by the car's view byte);
+   - HUD: two panels (the manager has two records, its own fields follow),
+     placed in the top quarters (`sub_00053700`); the state calls for
+     players 3 and 4 (`sub_00053D20`) skipped, as they would write into the
+     layout data after the two records.
 4. Pads 3 and 4 driving (controls.c's gate, the setup records' ports).
-5. HUD per view, results, sound.
+5. HUD panels for players 3 and 4, results, sound.
 6. The front end: players 3 and 4 choose their cars (first: a setting).
 
 ## Known limitations
 
 - **Track streaming follows two cars.** The streamer (`sub_001A20F0`) keeps
-  two foci in fixed locals (two section words, a count of 2, two pointers):
-  it follows players 1 and 2 only (`immediates`: its loop's end stays at
-  slot 1). Players 3 and 4 far from both may drive into track that is not
-  loaded. Four foci need that function rewritten.
+  two foci in fixed locals (two section words, a count of 2, two pointers)
+  and two windows (world + 0x12ADC8, 0x1CC each): it follows players 1 and 2
+  only (`immediates`: its loop ends after slot 1). Players 3 and 4 find
+  their ground in either window (the title's fallback switches a car's view
+  byte between 0 and 1); one far from both drives into track that is not
+  loaded and falls until the title puts it back. Four foci need that
+  function rewritten.
+- **No HUD for players 3 and 4.** The HUD manager (0x54F900) holds two
+  player records with its own fields right after them.
 
 ## Checks
 
@@ -124,7 +155,9 @@ not saved), the null backend for logic, Vulkan for pictures:
         BO3_SPLIT4_LOG=$PWD/runs/s2/split4.txt
 
 `BO3_SPLIT4_LOG` writes, every 30 flips, the racer counts and each human
-slot (vtable, index, phase, place, AI byte, position).
+slot (vtable, index, phase, place, AI byte, position), each car's track
+section and view byte (`sec`: -1 is no ground), the streamer's flags and
+each stream window's first section (`view`: -1 is not streaming).
 
 Four players (logic, the AI driving 3 and 4):
 

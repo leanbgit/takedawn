@@ -964,6 +964,42 @@
       "note": "sub_0012FEE0, a car's damage state set up (each start), after its loop that draws each panel's thresholds at random: [ebp+0xC] the state, a panel's damage at + 0xF90, swinging past + 0xFA8 (0.05..0.1), gone past + 0xFC0 (0.085..0.17) (sub_0012C860); [ebp+8] the physics body, the panel count at its model's + 0xC. BO3_SOFTBODY_PARTS scales the thresholds (src/game/softbody.c)."
     },
     {
+      "va": "0x001AA125",
+      "kind": "mark",
+      "name": "s4_stream_a",
+      "note": "sub_001AA100, the race world's load: after the dispatch's `mov esi, 2` (esi stays 2 for the whole function; a mark runs after its instruction). Steps 0x10 and 0x11 compare the human count with it (`cmp [0x73A1C0], esi`, 0x1AA3A7 and 0x1AA3E8): with two humans the track streamer's window 0 (world + 0x12ADC8) starts as one of two (sub_0019C740 ..., 1, 0) and window 1 (world + 0x12AF94) is started (..., 1, 1); otherwise window 0 alone. Without window 1 every car that looks its track up there (player 2's, and 3 and 4's, the title's view 1) has no ground. BO3_SPLIT4: at those two steps esi = the count when it is above 2, so four humans stream as two do, around players 1 and 2 (src/game/split4.c)."
+    },
+    {
+      "va": "0x001AA3A2",
+      "kind": "mark",
+      "name": "s4_stream_b",
+      "note": "sub_001AA100, step 0x10 reached from step 0xF: after its `mov esi, 2`, the same as s4_stream_a (src/game/split4.c)."
+    },
+    {
+      "va": "0x001AA404",
+      "kind": "mark",
+      "name": "s4_stream_end",
+      "note": "sub_001AA100, step 0x12 (after step 0x11's compare): esi back to 2, the constant the rest of the function expects (src/game/split4.c)."
+    },
+    {
+      "va": "0x00017191",
+      "kind": "mark",
+      "name": "s4_cam_frame",
+      "note": "sub_000170B0, the app's frame: after the players' camera updates (sub_00167940, esi the camera, the frame's time on the stack, ret 4), one for camera 0 and one for camera 1, unrolled (0x1717A, 0x1718C), and the `pop esi` after them. BO3_SPLIT4 with four racing updates cameras 2 and 3 the same way here, with the same time (app + 0x2E210; edi the app) (src/game/split4.c)."
+    },
+    {
+      "va": "0x00016DAE",
+      "kind": "mark",
+      "name": "s4_cam_reset",
+      "note": "sub_00016D00: after the players' cameras' vtable + 4 (0x167BE0, a reset: ecx the camera, no arguments) for camera 0 and camera 1, unrolled, and the store after them (`mov [edi + 0x2E18C], ebx`). BO3_SPLIT4 with four racing does it for cameras 2 and 3 here (src/game/split4.c)."
+    },
+    {
+      "va": "0x001AE37F",
+      "kind": "mark",
+      "name": "s4_env_view",
+      "note": "sub_001AE340, the stage render of one view (ebx the view): after `mov [0x60E170], ebx`, the current view of the object at 0x60E040 (+ 0x130), whose per-view entries (+ 0xB0, 0x40 each, two of them) come right before it; sub_001891F0 reads the current view's. Views 2 and 3 would read the index itself and the fields after it (view 3: no track drawn). BO3_SPLIT4: views 2 and 3 use entries 0 and 1 (view & 1) (src/game/split4.c)."
+    },
+    {
       "va": "0x0018C511",
       "kind": "mark",
       "name": "ap_update",

@@ -38,6 +38,15 @@ void split4_world_ctor(void (*gen)(void));    /* sub_001A9930 */
 void split4_world_load(void (*gen)(void));    /* sub_001AA100 */
 void split4_stage_start(void (*gen)(void));   /* sub_00017450 */
 void split4_stage_setup(void (*gen)(void));   /* sub_000209A0 */
+void split4_views_create(void (*gen)(void));  /* sub_0002ECC0 */
+void split4_view_select(void (*gen)(void));   /* sub_0002F330 */
+void split4_split_build(void (*gen)(void));   /* sub_0002F480 */
+void split4_camera_bind(void (*gen)(void));   /* sub_001674B0 */
+void split4_render_views(void (*gen)(void));  /* sub_001AE2F0 */
+void split4_stream_ready(void (*gen)(void));  /* sub_001AA920 */
+void split4_hud_state(void (*gen)(void));     /* sub_00053D20 */
+void split4_hud_layout(void (*gen)(void));    /* sub_00053700 */
+void split4_camera_mode(void (*gen)(void));   /* sub_001B4230 */
 /* Once a flip (main.c): BO3_SPLIT4_LOG. */
 void split4_log(uint32_t flip);
 
