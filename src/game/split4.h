@@ -45,6 +45,12 @@ void split4_camera_bind(void (*gen)(void));   /* sub_001674B0 */
 void split4_render_views(void (*gen)(void));  /* sub_001AE2F0 */
 void split4_stream_ready(void (*gen)(void));  /* sub_001AA920 */
 void split4_hud_state(void (*gen)(void));     /* sub_00053D20 */
+void split4_hud_ctor(void (*gen)(void));      /* sub_000526C0 */
+void split4_hud_build(void (*gen)(void));     /* sub_00052AB0 */
+void split4_hud_update(void (*gen)(void));    /* sub_000535E0 (under bo3_hud_update) */
+void split4_hud_draw(void (*gen)(void));      /* sub_000536C0 */
+void split4_hud_reset(void (*gen)(void));     /* sub_00053660 */
+void split4_hud_states(void (*gen)(void));    /* sub_00053620 */
 void split4_hud_layout(void (*gen)(void));    /* sub_00053700 */
 void split4_camera_mode(void (*gen)(void));   /* sub_001B4230 */
 /* Once a flip (main.c): BO3_SPLIT4_LOG. */

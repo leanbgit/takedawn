@@ -308,7 +308,11 @@ void sub_000165F0(void) { bo3_update(sub_000165F0_gen); }
 void sub_001E15E0(void) { bo3_frame_sync_dirty(sub_001E15E0_gen); }
 void sub_001DD280(void) { bo3_frame_get_ltm(sub_001DD280_gen); }
 void sub_000303D0(void) { bo3_draw_vehicle(sub_000303D0_gen); }
-void sub_000535E0(void) { bo3_hud_update(sub_000535E0_gen); }
+/* The HUD update: the high-refresh audit around it, and four players'
+ * second manager after it (split4.c). */
+#include "../split4.h"
+static void s4_hud_update_gen(void) { split4_hud_update(sub_000535E0_gen); }
+void sub_000535E0(void) { bo3_hud_update(s4_hud_update_gen); }
 void sub_00350DB0(void) { bo3_swap(sub_00350DB0_gen); }
 void sub_00167940(void) { bo3_player_frame(sub_00167940_gen); }
 void sub_00038200(void) { bo3_spark_history(sub_00038200_gen); }
@@ -529,3 +533,13 @@ extern void sub_00053700_gen(void);
 void sub_00053700(void) { split4_hud_layout(sub_00053700_gen); }    /* NTSC-U only */
 extern void sub_001B4230_gen(void);
 void sub_001B4230(void) { split4_camera_mode(sub_001B4230_gen); }   /* NTSC-U only */
+extern void sub_000526C0_gen(void);
+void sub_000526C0(void) { split4_hud_ctor(sub_000526C0_gen); }      /* NTSC-U only */
+extern void sub_00052AB0_gen(void);
+void sub_00052AB0(void) { split4_hud_build(sub_00052AB0_gen); }     /* NTSC-U only */
+extern void sub_000536C0_gen(void);
+void sub_000536C0(void) { split4_hud_draw(sub_000536C0_gen); }      /* NTSC-U only */
+extern void sub_00053660_gen(void);
+void sub_00053660(void) { split4_hud_reset(sub_00053660_gen); }     /* NTSC-U only */
+extern void sub_00053620_gen(void);
+void sub_00053620(void) { split4_hud_states(sub_00053620_gen); }    /* NTSC-U only */

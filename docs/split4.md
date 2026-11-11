@@ -124,12 +124,20 @@ and the two player cameras move to a four-slot block.
      end (`immediates` 0x1A2265) is the end of slot 1 (0x784FC0);
    - views 3 and 4 draw the track of the window their car is in (a copy of
      window 0 or 1, by the car's view byte);
-   - HUD: two panels (the manager has two records, its own fields follow),
-     placed in the top quarters (`sub_00053700`); the state calls for
-     players 3 and 4 (`sub_00053D20`) skipped, as they would write into the
-     layout data after the two records.
+   - HUD: the manager (0x54F900) has two panels (0x70 each) with its own
+     fields right after them, so players 3 and 4 get a second manager
+     (0x7B4000, built by the title's constructor `sub_000526C0` with its own
+     drawable memory) whose panels are the bottom quarters, P1's and P2's
+     the top ones (`sub_00053700`). Their widgets are copies of P1's static
+     ones (0x7B5000, 0x7B6200), created by the title's creation functions
+     as the two-player race creates P1's (`sub_00052AB0`) with panel 2 or 3
+     (the panel is also the player whose car a widget shows), then moved to
+     the second manager's panels 0 and 1. Its update, draw, reset and state
+     calls follow the first's (`sub_000535E0`, `sub_000536C0`,
+     `sub_00053660`, `sub_00053620`, and `sub_00053D20` for a player's
+     panel).
 4. Pads 3 and 4 driving (controls.c's gate, the setup records' ports).
-5. HUD panels for players 3 and 4, results, sound.
+5. Results, sound.
 6. The front end: players 3 and 4 choose their cars (first: a setting).
 
 ## Known limitations
@@ -142,8 +150,6 @@ and the two player cameras move to a four-slot block.
   byte between 0 and 1); one far from both drives into track that is not
   loaded and falls until the title puts it back. Four foci need that
   function rewritten.
-- **No HUD for players 3 and 4.** The HUD manager (0x54F900) holds two
-  player records with its own fields right after them.
 
 ## Checks
 
