@@ -188,8 +188,53 @@ and the two player cameras move to a four-slot block.
    Down the brake, Left and Right steering, End or Period boost, Page Down
    or Comma Crashbreaker, Home look back, Page Up change view. In menus and
    the pause menu the arrows are player 1's as before.
-5. Results, sound.
-6. The front end: players 3 and 4 choose their cars (first: a setting).
+5. Results, sound. Each race's end (window 1's release) and load (world
+   load step 1) start the streaming of players 3 and 4 afresh: windows 2
+   and 3 as their init (`sub_0019C6E0`) leaves them, not started, the
+   reader free, their buffer pools all free. The results' "race again"
+   loads the next race without the windows' init or load step 1, and the
+   buffers windows 2 and 3 freed at the end of a race only become free
+   again in the per-frame pass, which stops with the race: the next race's
+   window 2 waited for a buffer for ever, holding the reader, and the load
+   waited for it. Still to do: the finish rule (`sub_00024400`, written
+   for players 1 and 2: when all humans but one have finished it closes
+   the last one's race) and the results screens.
+6. Cars for players 3 and 4. The front end hands the race six car slots
+   (`sub_0005F7B0`: the race module + `0x10`, 8 bytes each: a car's id,
+   its name packed base 40, "COMPCAR3"; paints at + `0x78`, 4 bytes each),
+   players 1 and 2 first, then the rivals. The stage's start
+   (`sub_00017450`) gives human i slot i (human + `0x1970` the id,
+   + `0x1980` its class from the title's 67-car table at `0x39FC90` /
+   `0x39FEA8`, + `0x69` the paint) and the AI rivals slots 2 on, whatever
+   the human count: players 3 and 4 drove the first two rivals' cars, and
+   so did the two AIs. Now slots 2 and 3 hold players 3's and 4's cars for
+   the start and the AI rivals get the rivals' cars right after it.
+   Players 3's and 4's cars come from a choice (`split4_choose_car`, for a
+   front-end turn) or, until a menu sets it, `BO3_SPLIT4_CARS`: `copy` (the
+   default: player 3 drives player 1's car, player 4 player 2's), `random`
+   (one of the 50 racing cars), or names, `SPRTCAR2,MSCLCAR5` (a name may
+   end in `:paint`; one value alone is for both, `random`). Names: `COMPCAR1` ..
+   `COMPCAR10`, the same for `MSCL`, `CUPE`, `SPRT`, `SUPR`; `HSPCCAR20` ..
+   `HSPCCAR25`, `HEVYCAR1` .. `HEVYCAR10`, `HEVYCAR36`.
+
+   The car select has their turns. Its event method (`sub_00066490`, the
+   screen's vtable `0x3AC1B8`; the event, its button, the pad's port) keeps
+   whose turn it is (`0x463B20`) and each pick in the front end's game
+   set-up (`0x463AF0`: + `0x80` cars, + `0xC0` paints; slots 2 on are the
+   rivals'); the screen's car is at `0x559648` (+ 8 its id, + `0x28` its
+   paint). In the two-player race player 1's A (event 5, button 0) shows
+   player 2's turn and player 2's takes their pad (`0x4AED46`), fills the
+   rivals by the two cars' classes and starts the race; B (button 3) goes
+   a turn back. With four racing, player 2's A opens player 3's turn, then
+   player 4's (the game's turn stays 1: what it keeps per turn is two
+   wide), titled "P3 SELECT CAR" / "P4 SELECT CAR" (the title is "%1
+   SELECT CAR", `sub_00071F30`, with the name in setup record 1, "P2",
+   which reads P3 or P4 meanwhile; it is built again with each car shown,
+   `sub_00066AC0`); player 4's A
+   gives the game player 2's A with player 2's car and pad, and the race
+   starts as it did. Their picks go to `split4_choose_car` and win over
+   `BO3_SPLIT4_CARS`, which stays for "race again" without the menu and as
+   a fallback. B steps back through the turns.
 
 ## Known limitations
 
@@ -218,15 +263,22 @@ controller record (`pad`: the title's pad port).
 Four players (logic, the AI driving 3 and 4):
 
     SAVES=empty RECOMP_PB_BACKEND=null STOP_AT_END=1 DRIVE_SECS=60 \
-        tools/headless/split_scene.sh runs/s4 race BO3_SPLIT4=1 \
-        BO3_SPLIT4_AI=1 BO3_SPLIT4_LOG=$PWD/runs/s4/split4.txt
+        P34_CARSEL=1 tools/headless/split_scene.sh runs/s4 race \
+        BO3_SPLIT4=1 BO3_SPLIT4_AI=1 RECOMP_USB_PADS=4 \
+        BO3_SPLIT4_LOG=$PWD/runs/s4/split4.txt
+
+With `BO3_SPLIT4` the car select has four turns: `P34_CARSEL=1` has pads 3
+and 4 take theirs (`P3_CAR`, `P4_CAR`: their presses before the A, e.g.
+"right:200"; `BO3_UNLOCK_ALL=1` opens every car). `CS_HOLD=1600` holds the
+car select's presses long enough for the Vulkan backend without a GPU
+(about two flips a second); `CAPTURE=1` then keeps a frame of each turn.
 
 Four players with four pads (pads 3 and 4 scripted too, `P4_HOLD=lt`
 backs player 4 up, to tell the pads apart):
 
     SAVES=empty RECOMP_PB_BACKEND=null STOP_AT_END=1 DRIVE_SECS=40 P34=1 \
-        tools/headless/split_scene.sh runs/s5 race BO3_SPLIT4=1 \
-        RECOMP_USB_PADS=4 BO3_SPLIT4_LOG=$PWD/runs/s5/split4.txt
+        P34_CARSEL=1 tools/headless/split_scene.sh runs/s5 race \
+        BO3_SPLIT4=1 RECOMP_USB_PADS=4 BO3_SPLIT4_LOG=$PWD/runs/s5/split4.txt
 
 `RECOMP_WATCH=0x73A1C0` names the writer of the player count (on Linux the
 toolkit now scans the guest stack for the chain).

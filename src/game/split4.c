@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 extern ptrdiff_t g_xbox_mem_offset;
 #define S4_M8(va)  (*(const uint8_t *)((uintptr_t)g_xbox_mem_offset + (uint32_t)(va)))
@@ -129,6 +130,7 @@ extern RECOMP_TLS uint32_t g_eax, g_ecx, g_edx, g_esi, g_esp;
 
 #define S4_W8(va)  (*(uint8_t *)((uintptr_t)g_xbox_mem_offset + (uint32_t)(va)))
 #define S4_W32(va) (*(uint32_t *)((uintptr_t)g_xbox_mem_offset + (uint32_t)(va)))
+#define S4_W16(va) (*(uint16_t *)((uintptr_t)g_xbox_mem_offset + (uint32_t)(va)))
 #define S4_WF(va)  (*(float *)((uintptr_t)g_xbox_mem_offset + (uint32_t)(va)))
 
 #define S4_MODULE_CUR    0x004D5370u   /* the current module */
@@ -166,6 +168,7 @@ extern void sub_001B4230(void);        /* the player camera's reset, vtable +0xC
 extern void sub_00179760(void);        /* the AI driver's route reset (eax) */
 
 static int s_on = -1, s_ai = -1;
+static int s_traffic34_set;           /* split4_streamer: players 3's and 4's traffic bytes set */
 
 int split4_enabled(void)
 {
@@ -217,6 +220,8 @@ void split4_world_ctor(void (*gen)(void))
 
 /* The world's load steps (sub_001AA100): step 1 resets the cameras of
  * players 1 and 2 (vtable +0xC with 0xE, 0); those of 3 and 4 the same. */
+static void s4_streams_reset(void);
+
 void split4_world_load(void (*gen)(void))
 {
     uint32_t step = S4_M32(SPLIT4_WORLD + 0x144384u);
@@ -224,6 +229,7 @@ void split4_world_load(void (*gen)(void))
     gen();
     if (!split4_enabled() || step != 1)
         return;
+    s4_streams_reset();
     for (k = 2; k < SPLIT4_MAX_PLAYERS; k++) {
         uint32_t cam = S4_CAM + k * S4_CAM_SIZE;
         uint32_t a = g_eax, c = g_ecx, d = g_edx, sp = g_esp;
@@ -238,13 +244,176 @@ void split4_world_load(void (*gen)(void))
     }
 }
 
+/* ---- Cars for players 3 and 4 ----
+ *
+ * The front end hands the race its cars (sub_0005F7B0): the module's six
+ * car slots (+ 0x10, 8 bytes each: a car's id, its name packed base 40,
+ * "COMPCAR3") with a paint each (+ 0x78, 4 bytes each), players 1 and 2
+ * first, then the rivals. The stage's start (sub_00017450) gives human i
+ * slot i (human + 0x1970 the id, + 0x1980 its class from the title's car
+ * table, + 0x69 the paint) and the AI rivals slots 2, 3, ... whatever the
+ * human count (+ 0x20 on, AI racers 0x73F190 + 0x2470 x j). So players 3
+ * and 4 took the first two rivals' cars, and the two AIs drove the same.
+ *
+ * A player's choice (split4_choose_car: a menu turn later; until then
+ * BO3_SPLIT4_CARS) goes in slots 2 and 3 for the start, and the two AI
+ * rivals get the rivals' cars those slots held right after it.
+ * BO3_SPLIT4_CARS: "copy" (the default: player 3 player 1's car, player 4
+ * player 2's), "random" (any of the 50 racing cars), or two names,
+ * "SPRTCAR2,MSCLCAR5" (a name may end in ":paint", "COMPCAR4:2"; one value
+ * alone is for both). Each takes the paint of the player it copies (3:
+ * player 1's, 4: player 2's) unless given. */
+#define S4_CAR_SLOTS     0x10u         /* module: six cars, 8 bytes each */
+#define S4_CAR_PAINTS    0x78u         /* module: six paints, 4 bytes each */
+#define S4_CAR_TABLE     0x0039FC90u   /* the title's 67 cars (ids) */
+#define S4_CAR_CLASSES   0x0039FEA8u   /* their classes */
+#define S4_CAR_COUNT     67u
+#define S4_CAR_RACING    50u           /* COMP .. SUPR, ten each */
+#define S4_AI_RACER      0x0073F190u   /* the AI racers, 0x2470 each */
+#define S4_AI_SIZE       0x2470u
+
+static const char s4_b40[] = " -/0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_";
+
+static struct { uint32_t lo, hi, paint; int set; } s_car_choice[SPLIT4_MAX_PLAYERS];
+
+/* For a front-end turn later: player k's (2 or 3) car for the next race. */
+void split4_choose_car(unsigned k, uint32_t id_lo, uint32_t id_hi, uint32_t paint)
+{
+    if (k < SPLIT4_MAX_PLAYERS) {
+        s_car_choice[k].lo = id_lo;
+        s_car_choice[k].hi = id_hi;
+        s_car_choice[k].paint = paint;
+        s_car_choice[k].set = 1;
+    }
+}
+
+static int s4_car_index(uint32_t lo, uint32_t hi)
+{
+    unsigned i;
+    for (i = 0; i < S4_CAR_COUNT; i++)
+        if (S4_M32(S4_CAR_TABLE + i * 8u) == lo && S4_M32(S4_CAR_TABLE + i * 8u + 4u) == hi)
+            return (int)i;
+    return -1;
+}
+
+static void s4_car_name(uint32_t lo, uint32_t hi, char *out)
+{
+    uint64_t x = ((uint64_t)hi << 32) | lo;
+    char t[13];
+    int n = 0, i;
+    while (x && n < 12) {
+        t[n++] = s4_b40[x % 40u];
+        x /= 40u;
+    }
+    for (i = 0; i < n; i++)
+        out[i] = t[n - 1 - i];
+    while (n > 0 && out[n - 1] == ' ')
+        n--;
+    out[n] = 0;
+}
+
+/* "COMPCAR3" -> its id; 0 for a name the alphabet cannot hold */
+static int s4_car_id(const char *name, size_t len, uint32_t *lo, uint32_t *hi)
+{
+    uint64_t x = 0;
+    size_t i;
+    if (len == 0 || len > 12)
+        return 0;
+    for (i = 0; i < 12; i++) {
+        char c = i < len ? name[i] : ' ';
+        const char *p;
+        if (c >= 'a' && c <= 'z')
+            c = (char)(c - 'a' + 'A');
+        p = strchr(s4_b40, c);
+        if (!p || !c)
+            return 0;
+        x = x * 40u + (uint64_t)(p - s4_b40);
+    }
+    *lo = (uint32_t)x;
+    *hi = (uint32_t)(x >> 32);
+    return 1;
+}
+
+/* player k's (2 or 3) car and paint for this race: the menu's, else the
+ * setting's */
+static void s4_car_pick(uint32_t mod, unsigned k, uint32_t *lo, uint32_t *hi, uint32_t *paint,
+                        const char **how)
+{
+    unsigned from = k - 2u;                  /* the player copied: 1 or 2 */
+    const char *v = getenv("BO3_SPLIT4_CARS"), *w;
+    size_t len = 0;
+    unsigned i;
+
+    *lo = S4_M32(mod + S4_CAR_SLOTS + from * 8u);
+    *hi = S4_M32(mod + S4_CAR_SLOTS + from * 8u + 4u);
+    *paint = S4_M32(mod + S4_CAR_PAINTS + from * 4u);
+    *how = "copy";
+    if (s_car_choice[k].set) {
+        *lo = s_car_choice[k].lo;
+        *hi = s_car_choice[k].hi;
+        *paint = s_car_choice[k].paint;
+        *how = "chosen";
+        return;
+    }
+    /* this player's part of the setting: the (k-2)th comma field, or the
+     * only one */
+    w = v;
+    if (w && *w) {
+        for (i = 0; i < from && strchr(w, ','); i++)
+            w = strchr(w, ',') + 1;
+        len = strcspn(w, ",");
+    }
+    if (!w || !len || (len == 4 && !strncmp(w, "copy", 4)))
+        return;
+    if (len == 6 && !strncmp(w, "random", 6)) {
+        static int seeded;
+        unsigned r;
+        if (!seeded++)
+            srand((unsigned)time(NULL));
+        r = (unsigned)rand() % S4_CAR_RACING;
+        *lo = S4_M32(S4_CAR_TABLE + r * 8u);
+        *hi = S4_M32(S4_CAR_TABLE + r * 8u + 4u);
+        *how = "random";
+        return;
+    }
+    {
+        size_t nl = strcspn(w, ",:");
+        uint32_t l, h;
+        if (nl > len)
+            nl = len;
+        if (!s4_car_id(w, nl, &l, &h) || s4_car_index(l, h) < 0) {
+            fprintf(stderr, "[SPLIT4] BO3_SPLIT4_CARS: no car \"%.*s\" (COMPCAR1 .. SUPRCAR10, "
+                            "HSPCCAR20 .. HSPCCAR25, HEVYCAR1 .. HEVYCAR10, HEVYCAR36); player %u copies\n",
+                    (int)nl, w, k + 1);
+            return;
+        }
+        *lo = l;
+        *hi = h;
+        if (nl < len && w[nl] == ':')
+            *paint = (uint32_t)strtoul(w + nl + 1, NULL, 10);
+        *how = "set";
+    }
+}
+
+/* a racer's car: id, class, paint (as the stage's start writes them) */
+static void s4_racer_car(uint32_t racer, uint32_t lo, uint32_t hi, uint32_t paint)
+{
+    int i = s4_car_index(lo, hi);
+    S4_W32(racer + 0x1970u) = lo;
+    S4_W32(racer + 0x1974u) = hi;
+    S4_W32(racer + 0x1980u) = i >= 0 ? S4_M32(S4_CAR_CLASSES + (uint32_t)i * 4u) : 0;
+    S4_W8(racer + 0x69u) = (uint8_t)paint;
+}
+
 /* The stage's start (sub_00017450, ecx the module): four humans, the AIs to
- * fill six cars, and cameras 2 and 3 built once (the app's constructor
- * builds two, 0x157D3). */
+ * fill six cars, players 3's and 4's cars (above), and cameras 2 and 3
+ * built once (the app's constructor builds two, 0x157D3). */
 void split4_stage_start(void (*gen)(void))
 {
     uint32_t mod = g_ecx;
     unsigned k;
+    uint32_t rival[4], rpaint[2];
+    int cars = 0;
 
     if (split4_enabled() && mod && S4_M32(mod) == S4_VT_STAGE_2P) {
         uint32_t ais = S4_M32(mod + S4_STAGE_AIS);
@@ -276,9 +445,42 @@ void split4_stage_start(void (*gen)(void))
         }
         fprintf(stderr, "[SPLIT4] stage start: %u humans, %u AIs\n",
                 S4_M32(mod + S4_STAGE_HUMANS), S4_M32(mod + S4_STAGE_AIS));
+        if (!s4_skip("cars")) {
+            /* slots 2 and 3: players 3's and 4's for the start, the
+             * rivals' kept for the AIs */
+            for (k = 0; k < 4u; k++)
+                rival[k] = S4_M32(mod + S4_CAR_SLOTS + 0x10u + k * 4u);
+            rpaint[0] = S4_M32(mod + S4_CAR_PAINTS + 8u);
+            rpaint[1] = S4_M32(mod + S4_CAR_PAINTS + 12u);
+            for (k = 2; k < SPLIT4_MAX_PLAYERS; k++) {
+                uint32_t lo, hi, paint;
+                const char *how;
+                char name[16];
+                s4_car_pick(mod, k, &lo, &hi, &paint, &how);
+                S4_W32(mod + S4_CAR_SLOTS + k * 8u) = lo;
+                S4_W32(mod + S4_CAR_SLOTS + k * 8u + 4u) = hi;
+                S4_W32(mod + S4_CAR_PAINTS + k * 4u) = paint;
+                s4_car_name(lo, hi, name);
+                fprintf(stderr, "[SPLIT4] player %u's car: %s, paint %u (%s)\n", k + 1, name, paint, how);
+            }
+            cars = 1;
+        }
     }
     g_ecx = mod;
     gen();
+    if (cars) {
+        /* the AI rivals (they read slots 2 on) get the rivals' cars */
+        for (k = 0; k < 2u && k < S4_M32(mod + S4_STAGE_AIS); k++) {
+            char name[16];
+            s4_racer_car(S4_AI_RACER + k * S4_AI_SIZE, rival[k * 2u], rival[k * 2u + 1u], rpaint[k]);
+            s4_car_name(rival[k * 2u], rival[k * 2u + 1u], name);
+            fprintf(stderr, "[SPLIT4] rival %u's car: %s, paint %u\n", k + 1, name, rpaint[k]);
+        }
+        for (k = 0; k < 4u; k++)
+            S4_W32(mod + S4_CAR_SLOTS + 0x10u + k * 4u) = rival[k];
+        S4_W32(mod + S4_CAR_PAINTS + 8u) = rpaint[0];
+        S4_W32(mod + S4_CAR_PAINTS + 12u) = rpaint[1];
+    }
 }
 
 /* The two-player stage's set-up (sub_000209A0) fills the setup records of
@@ -725,8 +927,6 @@ static void split4_env_view(void)
  * foci, players 1 and 2). Players 3 and 4 wrote past them, over the traffic
  * car count (+ 0x363AB) and its neighbour, and no traffic came. It runs for
  * two. */
-static int s_traffic34_set;           /* split4_streamer's players 3 and 4 */
-
 void split4_traffic_init(void (*gen)(void))
 {
     uint32_t n = S4_M32(SPLIT4_WORLD + 0x12B7C0u);
@@ -973,6 +1173,37 @@ static void s4_pool2_release(void)
         }
 }
 
+/* Each race's load (world load step 1) and each race's end (window 1's
+ * release): windows 2 and 3 as their init leaves them, not started, the
+ * reader not held by them, their pools all free again. The results' "race
+ * again" loads the next race without the windows' init or load step 1,
+ * and a race that ends leaves buffers its windows freed (descriptor 2)
+ * that only the per-frame pass (s4_pool2_release) makes 0 again: the next
+ * race's window 2 waited for a buffer for ever, holding the reader, and
+ * the load waited for it. */
+extern void sub_0019C6E0_gen(void);     /* a stream window's init (eax) */
+
+static void s4_streams_reset(void)
+{
+    unsigned k;
+    uint32_t lock = S4_M32(S4_WIN_LOCK);
+    /* windows 2 and 3 as their init leaves them (state 1, nothing held;
+     * it also frees the reader, which only a start of 2 or 3 could hold
+     * now) */
+    for (k = 2; k < SPLIT4_MAX_PLAYERS; k++) {
+        s4_gcall_r(sub_0019C6E0_gen, s4_win(k), 0, NULL, NULL);
+        s_win_started[k] = 0;
+    }
+    if (lock != 0xFFFFFFFFu && lock != 2u && lock != 3u)
+        S4_W32(S4_WIN_LOCK) = lock;     /* windows 0's and 1's own, as it was */
+    s_win1_ready = 0;
+    memset(s_pool2_age, 0, sizeof s_pool2_age);
+    if (s_pool2_a)
+        s4_pool2_reset();
+    s_traffic34_set = 0;
+    fprintf(stderr, "[SPLIT4] streaming for players 3 and 4 reset\n");
+}
+
 static void split4_stream_cmp(void)
 {
     uint32_t step = S4_M32(SPLIT4_WORLD + 0x144384u);   /* the load step */
@@ -1100,6 +1331,9 @@ void split4_win_release(void (*gen)(void))
         s4_win_call(k, gen, g_eax, 1, push);
         s_win_started[k] = 0;
     }
+    /* the next race may come without an init or a load step 1 (the
+     * results' "race again"): windows 2 and 3 fresh for it now */
+    s4_streams_reset();
 }
 
 /* sub_001AA920 (esi the world): each frame, windows 0 and 1 updated
@@ -1516,4 +1750,141 @@ void split4_render_views(void (*gen)(void))
         sub_001AE340();
         g_eax = a; g_ebx = b; g_ecx = c; g_edx = d; g_esi = si; g_edi = di; g_esp = sp;
     }
+}
+
+/* ---- The car select: turns for players 3 and 4 ----
+ *
+ * The car select's event method (sub_00066490, the screen's vtable
+ * 0x3AC1B8; ret 16: the event, its button, the pad's port, one more)
+ * keeps whose turn it is at 0x463B20 and the players who choose at
+ * 0x463B14, and each player's pick in the front end's game set-up
+ * (0x463AF0: + 0x80 cars, 8 bytes each, + 0xC0 paints, 4 each; slots 2 on
+ * are the rivals'). The screen's car is at 0x559648 (+ 8 its id, + 0x28
+ * its paint). An A (event 5, button 0) stores the screen's car in the
+ * turn's slot; in the two-player race (set-up + 0xC not 4, the front end's
+ * multiplayer mode 2 at + 4) player 1's moves the turn to 1 and shows
+ * player 2's car, player 2's takes their pad (0x4AED46), fills the rivals
+ * by the two cars' classes and starts the race. B (button 3) goes a turn
+ * back, or off the screen from player 1's.
+ *
+ * With four racing, player 2's A opens players 3's and 4's turns instead
+ * (the game's turn stays 1: what it keeps per turn is two wide), titled
+ * "P3 SELECT CAR", "P4 ..." (the title is "%1 SELECT CAR" with the name in
+ * setup record 1, "P2", which reads P3 or P4 for the while; the title is
+ * built again with each car shown), and player 4's A
+ * gives the game player 2's A, with player 2's car and pad as they were.
+ * Their picks go to split4_choose_car. B steps back through the turns. */
+#define S4_CS_TURN       0x00463B20u
+#define S4_CS_SETUP      0x00463AF0u
+#define S4_CS_CAR        0x00559648u   /* the screen's car: + 8 id, + 0x28 paint */
+
+extern void sub_00066AC0(void);        /* show a car (id lo, hi, paint; ret 12) */
+
+static unsigned s_cs_turn;             /* 2 or 3: player 3's or 4's turn; 0 the game's */
+static uint32_t s_cs_p2[4];            /* player 2's pick and port: lo, hi, paint, port */
+static uint32_t s_cs_title_saved;      /* setup record 1's name ("P2"), while it reads P3 or P4 */
+static uint32_t s_cs_pick[SPLIT4_MAX_PLAYERS][3];
+
+/* the title for the game's turn 1 ("%1 SELECT CAR", %1 the name in the
+ * setup record of turn & 1, + 4: "P2") names player k (1-based 2, 3, 4) */
+static void s4_cs_title(unsigned k)
+{
+    uint32_t name = S4_SETUP + S4_SETUP_SIZE + 4u;
+    if (k == 2u) {
+        if (s_cs_title_saved) {
+            S4_W32(name) = s_cs_title_saved;
+            S4_W16(name + 4u) = 0;
+            s_cs_title_saved = 0;
+        }
+        return;
+    }
+    if (!s_cs_title_saved)
+        s_cs_title_saved = S4_M32(name);
+    S4_W16(name) = 'P';
+    S4_W16(name + 2u) = (uint16_t)('0' + k);
+    S4_W16(name + 4u) = 0;
+}
+
+static void s4_cs_show(uint32_t lo, uint32_t hi, uint32_t paint)
+{
+    uint32_t a[] = { paint, hi, lo };
+    s4_gcall(sub_00066AC0, g_eax, g_ecx, g_edx, g_ebx, g_esi, g_edi, 3, a);
+}
+
+static void s4_cs_reset(void)
+{
+    s_cs_turn = 0;
+    s4_cs_title(2);
+}
+
+void split4_carsel_event(void (*gen)(void))
+{
+    uint32_t sp = g_esp, ev = S4_M32(sp + 4u), button = S4_M32(sp + 12u), port = S4_M32(sp + 16u);
+    uint32_t lo = S4_M32(S4_CS_CAR + 8u), hi = S4_M32(S4_CS_CAR + 12u), paint = S4_M32(S4_CS_CAR + 0x28u);
+    int race2 = split4_enabled() && !s4_skip("carsel") && S4_M32(S4_CS_SETUP + 4u) == 2u
+             && S4_M32(S4_CS_SETUP + 0xCu) != 4u && S4_M32(S4_CS_TURN) == 1u;
+
+    if (ev == 2u || ev == 3u) {                /* the screen left or entered */
+        s4_cs_reset();
+        gen();
+        return;
+    }
+    if (ev != 5u || !race2 || (button != 0u && button != 3u)) {
+        gen();
+        return;
+    }
+    if (button == 3u) {                        /* B */
+        if (s_cs_turn == 0) {
+            gen();
+            return;
+        }
+        if (s_cs_turn == 2u) {                 /* back to player 2's */
+            s4_cs_reset();
+            s4_cs_show(s_cs_p2[0], s_cs_p2[1], s_cs_p2[2]);
+        } else {                               /* back to player 3's */
+            s_cs_turn = 2;
+            s4_cs_title(3);
+            s4_cs_show(s_cs_pick[2][0], s_cs_pick[2][1], s_cs_pick[2][2]);
+        }
+        g_esp += 20u;                          /* its ret 16 */
+        return;
+    }
+    if (s_cs_turn == 0) {                      /* player 2's A: player 3's turn */
+        s_cs_p2[0] = lo; s_cs_p2[1] = hi; s_cs_p2[2] = paint; s_cs_p2[3] = port;
+        S4_W32(S4_CS_SETUP + 0x88u) = lo;      /* as the game stores it */
+        S4_W32(S4_CS_SETUP + 0x8Cu) = hi;
+        S4_W32(S4_CS_SETUP + 0xC4u) = paint;
+        s_cs_turn = 2;
+        s4_cs_title(3);
+        if (!s_cs_pick[2][0] && !s_cs_pick[2][1]) {
+            s_cs_pick[2][0] = lo; s_cs_pick[2][1] = hi; s_cs_pick[2][2] = paint;
+        }
+        s4_cs_show(s_cs_pick[2][0], s_cs_pick[2][1], s_cs_pick[2][2]);
+        g_esp += 20u;
+        return;
+    }
+    s_cs_pick[s_cs_turn][0] = lo; s_cs_pick[s_cs_turn][1] = hi; s_cs_pick[s_cs_turn][2] = paint;
+    split4_choose_car(s_cs_turn, lo, hi, paint);
+    {
+        char name[16];
+        s4_car_name(lo, hi, name);
+        fprintf(stderr, "[SPLIT4] car select: player %u picks %s, paint %u\n", s_cs_turn + 1, name, paint);
+    }
+    if (s_cs_turn == 2u) {                     /* player 3's A: player 4's turn */
+        s_cs_turn = 3;
+        s4_cs_title(4);
+        if (!s_cs_pick[3][0] && !s_cs_pick[3][1]) {
+            s_cs_pick[3][0] = lo; s_cs_pick[3][1] = hi; s_cs_pick[3][2] = paint;
+        }
+        s4_cs_show(s_cs_pick[3][0], s_cs_pick[3][1], s_cs_pick[3][2]);
+        g_esp += 20u;
+        return;
+    }
+    /* player 4's A: the game's player 2 A, as player 2 gave it */
+    s4_cs_reset();
+    S4_W32(S4_CS_CAR + 8u) = s_cs_p2[0];
+    S4_W32(S4_CS_CAR + 12u) = s_cs_p2[1];
+    S4_W32(S4_CS_CAR + 0x28u) = s_cs_p2[2];
+    S4_W32(sp + 16u) = s_cs_p2[3];
+    gen();
 }

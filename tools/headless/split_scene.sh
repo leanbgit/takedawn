@@ -56,8 +56,22 @@ esac
 press a:400 90                          # P1 Select Car
 wait_log 'CAR1[.]bgv' "car select (CAR1.bgv)"
 wait_flips 60
-press a:400 90                          # P1's car: P2 Select Car
-press p2-a:400 0                        # P2's car: loading
+# CS_HOLD: how long the car select's presses are held (ms; 400). A slow
+# renderer (Vulkan without a GPU, ~2 flips a second) needs 1500 or more.
+cs=${CS_HOLD:-400}
+press a:$cs 90                          # P1's car: P2 Select Car
+if [ "${P34_CARSEL:-0}" = 1 ]; then        # four players: P3's and P4's turns
+    press p2-a:$cs 60                   # P2's car: P3's turn
+    for p in ${P3_CAR:-}; do press "p3-$p" 30; done
+    # CAPTURE=1: a frame of each of the two turns, shots/carsel_p3.bmp, _p4
+    [ "${CAPTURE:-0}" = 1 ] && { f=$(( $(flip) + 30 )); echo "$f-$f" >> "$D/dumpat.txt"; echo "p3 $f" >> "$D/carsel.txt"; wait_flips 60; }
+    press p3-a:$cs 60                   # P3's car: P4's turn
+    for p in ${P4_CAR:-}; do press "p4-$p" 30; done
+    [ "${CAPTURE:-0}" = 1 ] && { f=$(( $(flip) + 30 )); echo "$f-$f" >> "$D/dumpat.txt"; echo "p4 $f" >> "$D/carsel.txt"; wait_flips 60; }
+    press p4-a:$cs 0                    # P4's car: loading
+else
+    press p2-a:$cs 0                    # P2's car: loading
+fi
 wait_log 'streamed[.]dat' "stage streamed in"
 
 shots() {   # a frame every SHOT_SECS seconds while the game runs, for <secs>

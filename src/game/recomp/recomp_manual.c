@@ -531,6 +531,8 @@ extern void sub_001A28B0_gen(void);
 void sub_001A28B0(void) { split4_traffic_init(sub_001A28B0_gen); }  /* NTSC-U only */
 extern void sub_001A20F0_gen(void);
 void sub_001A20F0(void) { split4_streamer(sub_001A20F0_gen); }  /* NTSC-U only */
+extern void sub_00066490_gen(void);
+void sub_00066490(void) { split4_carsel_event(sub_00066490_gen); }  /* NTSC-U only */
 extern void sub_00053D20_gen(void);
 void sub_00053D20(void) { split4_hud_state(sub_00053D20_gen); }     /* NTSC-U only */
 extern void sub_00053700_gen(void);

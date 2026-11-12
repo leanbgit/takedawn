@@ -31,7 +31,8 @@ void split4_reserve(void);
 int split4_check(void);
 /* BO3_SPLIT4=1: the two-player stage plays four (step 3, bring-up). */
 int split4_enabled(void);
-int split4_keys_port(void);   /* BO3_SPLIT4_KEYS: the arrows' pad port, or -1 */
+int split4_keys_port(void);
+void split4_choose_car(unsigned player, uint32_t id_lo, uint32_t id_hi, uint32_t paint);  /* player 2 or 3 (0-based) */   /* BO3_SPLIT4_KEYS: the arrows' pad port, or -1 */
 /* At start-up, before the guest runs (main.c): registers the mark hooks. */
 void split4_start(void);
 /* Wrappers of generated functions (recomp/recomp_manual.c). */
@@ -47,6 +48,7 @@ void split4_render_views(void (*gen)(void));  /* sub_001AE2F0 */
 void split4_stream_ready(void (*gen)(void));  /* sub_001AA920 */
 void split4_traffic_init(void (*gen)(void));  /* sub_001A28B0 */
 void split4_streamer(void (*gen)(void));      /* sub_001A20F0 */
+void split4_carsel_event(void (*gen)(void));  /* sub_00066490 */
 void split4_hud_state(void (*gen)(void));     /* sub_00053D20 */
 void split4_hud_ctor(void (*gen)(void));      /* sub_000526C0 */
 void split4_hud_build(void (*gen)(void));     /* sub_00052AB0 */
