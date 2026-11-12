@@ -43,6 +43,7 @@
 #include "platform/recomp_patch.h"
 #include "recomp_types.h"
 #include "race_module.h"
+#include "split4.h"                    /* the arrows as player 3 or 4 */
 
 extern RECOMP_TLS uint32_t g_ebx, g_esi;
 extern ptrdiff_t g_xbox_mem_offset;
@@ -104,6 +105,57 @@ static int ctl_driving_for(unsigned player)
 static int ctl_driving(void)
 {
     return ctl_driving_for(0);
+}
+
+/* Four-player split screen, BO3_SPLIT4_KEYS (split4.c): while four race,
+ * the arrow keys drive player 3 or 4 instead of player 1, who keeps W A S D
+ * and the other keys. On the arrows' player's pad: Up the accelerator, Down
+ * the brake, Left and Right the stick, End or Period boost (A), Page Down
+ * or Comma Crashbreaker (B), Home look back (X), Page Up change view (Y).
+ * The pad's packet number moves when the keys do, so the title takes the
+ * new state. */
+static int key(int vk) { return xbox_FramebufferKeyDown(vk); }
+
+static void ctl_split4_keys(uint32_t port, uint32_t rec, XBOX_GAMEPAD *g)
+{
+    static uint32_t last[4];
+    int kp = split4_keys_port();
+    uint32_t bits = 0;
+
+    if (kp < 0)
+        return;
+    if (port == 2u && (xbox_InputSources(0) & XBOX_INPUT_SRC_KEYS)) {
+        /* player 1's port: what the arrows added, unless a letter holds it too */
+        int pad = (xbox_InputSources(0) & XBOX_INPUT_SRC_PAD) != 0;
+        if (key(XBOX_VK_UP))    g->wButtons &= (uint16_t)~XBOX_GAMEPAD_DPAD_UP;
+        if (key(XBOX_VK_DOWN))  g->wButtons &= (uint16_t)~XBOX_GAMEPAD_DPAD_DOWN;
+        if (key(XBOX_VK_LEFT))  g->wButtons &= (uint16_t)~XBOX_GAMEPAD_DPAD_LEFT;
+        if (key(XBOX_VK_RIGHT)) g->wButtons &= (uint16_t)~XBOX_GAMEPAD_DPAD_RIGHT;
+        if (!pad) {
+            if (key(XBOX_VK_UP) && !key('W'))
+                g->bAnalogButtons[XBOX_BUTTON_RTRIGGER] = 0;
+            if (key(XBOX_VK_DOWN) && !key('S'))
+                g->bAnalogButtons[XBOX_BUTTON_LTRIGGER] = 0;
+            if (key(XBOX_VK_LEFT) || key(XBOX_VK_RIGHT))
+                g->sThumbLX = (int16_t)((key('D') ? 32767 : 0) - (key('A') ? 32767 : 0));
+        }
+    }
+    if ((int)port != kp)
+        return;
+    if (key(XBOX_VK_UP))    { g->bAnalogButtons[XBOX_BUTTON_RTRIGGER] = 255; bits |= 1; }
+    if (key(XBOX_VK_DOWN))  { g->bAnalogButtons[XBOX_BUTTON_LTRIGGER] = 255; bits |= 2; }
+    if (key(XBOX_VK_LEFT) != key(XBOX_VK_RIGHT)) {
+        g->sThumbLX = key(XBOX_VK_LEFT) ? (int16_t)-32767 : (int16_t)32767;
+        bits |= key(XBOX_VK_LEFT) ? 4 : 8;
+    }
+    if (key(0x23) || key(0xBE)) { g->bAnalogButtons[XBOX_BUTTON_A] = 255; bits |= 16; }
+    if (key(0x22) || key(0xBC)) { g->bAnalogButtons[XBOX_BUTTON_B] = 255; bits |= 32; }
+    if (key(0x24))              { g->bAnalogButtons[XBOX_BUTTON_X] = 255; bits |= 64; }
+    if (key(0x21))              { g->bAnalogButtons[XBOX_BUTTON_Y] = 255; bits |= 128; }
+    if (bits != last[port & 3u]) {
+        M32(rec + 8u) = M32(rec + 8u) + 1u;
+        last[port & 3u] = bits;
+    }
 }
 
 /* BO3_CTL_LOG=<file>: what the gate saw and did, for the scene test
@@ -170,6 +222,7 @@ static void ctl_pad(void)
     if (M32(rec) != 2 || !M32(rec + 4))         /* no pad open on this port */
         return;
     g = (XBOX_GAMEPAD *)((uintptr_t)g_xbox_mem_offset + rec + 0xC);
+    ctl_split4_keys(port, rec, g);
     /* Esc while driving is Start (bo3_ctl_esc). Keys are the host port 0's,
      * the title's port 2, and only when this read carries a Back: with the
      * overlay open the state is neutral, and its Esc must not pause. */
@@ -202,11 +255,16 @@ static void ctl_pad(void)
 
     /* The emulated pads sit on the title's last two ports: the title's port
      * 2 is the first host pad. */
-    src = usb >= 0 ? xbox_InputSources((DWORD)usb) : 0;
+    /* With four controllers (RECOMP_USB_PADS=4) the third and fourth are
+     * the title's ports 0 and 1: players 3 and 4 of the four-player split
+     * screen (split4.c), who go by player 1's event. */
+    if (usb < 0)
+        usb += 4;
+    src = xbox_InputSources((DWORD)usb);
     /* The pad of the title's port 2 is player 1's, port 3 player 2's (split
      * screen): each goes by its own player's event. */
-    driving = ctl_driving_for(usb >= 1 ? 1u : 0u);
-    scripted = usb >= 0 && (xbox_InputScriptedPads() & (1u << usb));
+    driving = ctl_driving_for(usb == 1 ? 1u : 0u);
+    scripted = (xbox_InputScriptedPads() & (1u << usb)) != 0;
     nintendo = xbox_InputFaceLayoutNintendo();
     /* The keys and the on-screen controls are the Xbox layout always. */
     ps2 = scheme == 1 && driving

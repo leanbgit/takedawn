@@ -31,6 +31,7 @@ void split4_reserve(void);
 int split4_check(void);
 /* BO3_SPLIT4=1: the two-player stage plays four (step 3, bring-up). */
 int split4_enabled(void);
+int split4_keys_port(void);   /* BO3_SPLIT4_KEYS: the arrows' pad port, or -1 */
 /* At start-up, before the guest runs (main.c): registers the mark hooks. */
 void split4_start(void);
 /* Wrappers of generated functions (recomp/recomp_manual.c). */
@@ -44,6 +45,8 @@ void split4_split_build(void (*gen)(void));   /* sub_0002F480 */
 void split4_camera_bind(void (*gen)(void));   /* sub_001674B0 */
 void split4_render_views(void (*gen)(void));  /* sub_001AE2F0 */
 void split4_stream_ready(void (*gen)(void));  /* sub_001AA920 */
+void split4_traffic_init(void (*gen)(void));  /* sub_001A28B0 */
+void split4_streamer(void (*gen)(void));      /* sub_001A20F0 */
 void split4_hud_state(void (*gen)(void));     /* sub_00053D20 */
 void split4_hud_ctor(void (*gen)(void));      /* sub_000526C0 */
 void split4_hud_build(void (*gen)(void));     /* sub_00052AB0 */
@@ -51,6 +54,13 @@ void split4_hud_update(void (*gen)(void));    /* sub_000535E0 (under bo3_hud_upd
 void split4_hud_draw(void (*gen)(void));      /* sub_000536C0 */
 void split4_hud_reset(void (*gen)(void));     /* sub_00053660 */
 void split4_hud_states(void (*gen)(void));    /* sub_00053620 */
+void split4_car_view(void (*gen)(void));      /* sub_001177B0 */
+void split4_win_init(void (*gen)(void));      /* sub_0019C6E0 */
+void split4_win_start(void (*gen)(void));     /* sub_0019C740 */
+void split4_win_release(void (*gen)(void));   /* sub_0019CA30 */
+void split4_win_restart(void (*gen)(void));   /* sub_001AABD0 */
+void split4_car_reset(void (*gen)(void));     /* sub_0011A8F0 */
+void split4_car_reset2(void (*gen)(void));    /* sub_0010EDF0 */
 void split4_hud_layout(void (*gen)(void));    /* sub_00053700 */
 void split4_camera_mode(void (*gen)(void));   /* sub_001B4230 */
 /* Once a flip (main.c): BO3_SPLIT4_LOG. */

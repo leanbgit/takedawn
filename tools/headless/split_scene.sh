@@ -103,6 +103,14 @@ p2-rt+a:3000
 rt+a+lleft:1200
 p2-rt+a+lright:1200
 EOF
+    # P34=1 (four players, RECOMP_USB_PADS=4): pads 3 and 4 drive too (P4_HOLD,
+    # default rt+a: what pad 4 holds instead, "lt" reverses).
+    if [ "${P34:-0}" = 1 ]; then
+        h4=${P4_HOLD:-rt+a}
+        printf '%s\n' p3-rt+a:7000 "p4-$h4:5000" p3-rt+a+lleft:2200 "p4-$h4+lright:2600" \
+            p3-rt+a:5000 "p4-$h4:7000" p3-rt+a+lright:2600 "p4-$h4+lleft:2200" \
+            p3-rt+a:4200 "p4-$h4:4200" >> "$D/pad.txt"
+    fi
 done
 shots $(( ${DRIVE_SECS:-60} + 30 ))
 scene_end "split scene $mode"

@@ -6,8 +6,9 @@ as the two-player stage behaves today.
 
 Status: step 3 in progress. With `BO3_SPLIT4=1` the two-player stage
 races four humans and two AI rivals to the end without a fault (headless,
-null backend, players 3 and 4 driven by the title's AI with
-`BO3_SPLIT4_AI=1`). Only two views are drawn yet. Without `BO3_SPLIT4` two
+null backend, players 3 and 4 driven by their pads with
+`RECOMP_USB_PADS=4`, or by the title's AI with `BO3_SPLIT4_AI=1`), four
+views, four HUDs, the track streamed around each player. Without `BO3_SPLIT4` two
 players race as before.
 
 ## Building this branch
@@ -41,8 +42,10 @@ The race world is one static object at `0x60EA00`:
 | `+0x13BDC0` | `0x74A7C0` | network racers, 0x1AB0 each |
 
 A human racer is an AI racer (`0x2470` bytes) and more; `+0x2470` points to
-its setup record (`0x4CFAD0 + 0x24 x player`: the pad port at `+0x18`, the
-profile), `+0x27D0` is its player index, `+0x27D8` the "AI drives" byte,
+its setup record (`0x4CFAD0 + 0x24 x player`: `+0` the controller record
+whose pad the car drives with, `0x4AE724 + 0x188 x n` for the title's pad
+port n; `+0x18` the player's number, by which the set-up picks it from
+`0x4AED45`), `+0x27D0` is its player index, `+0x27D8` the "AI drives" byte,
 `+0x134C` its phase (1 before the GO, 2 in play, 3 finished).
 
 `sub_001AACB0(world, humans, ais, net)` fills the racer table from the
@@ -101,7 +104,13 @@ and the two player cameras move to a four-slot block.
    - `recomp_manual.c` wrappers: the world's constructor (human vtables),
      the world's load step 1 (camera reset for 3 and 4), the stage's start
      (four humans, at most two AIs, cameras built), the two-player set-up
-     (setup records for pads 3 and 4).
+     (setup records for players 3 and 4: the two controller records players
+     1 and 2 do not have, the title's pad ports 0 and 1).
+   - the app fills the setup records too, through its own pointer (app
+     `0x4A71A0 + 0x28930`: `sub_00015A60`, `sub_00015F10`, `sub_000165F0`),
+     so the setup relocation has the app as its base. Without it the front
+     end's records stayed at the old address and players 1 and 2 both drove
+     with player 1's pad (the two-player race included).
    - four views (`split4.c`, the four-view part): views 3 and 4 built like
      the title's two (`sub_0002ECC0`), the split builder makes four quarter
      sub-rasters (`sub_0002F480`), the view select takes modes 3 and 4
@@ -122,8 +131,35 @@ and the two player cameras move to a four-slot block.
      that looks its ground up there (player 2's; 3's and 4's, which the
      title gives view 1) fell through the track. The streamer's focus loop
      end (`immediates` 0x1A2265) is the end of slot 1 (0x784FC0);
-   - views 3 and 4 draw the track of the window their car is in (a copy of
-     window 0 or 1, by the car's view byte);
+   - stream windows 2 and 3 (0x793000 + 0x1CC * k) follow players 3 and 4:
+     the title inits two (`sub_0019C6E0`), so the hook after window 1's init
+     inits the others, starts them one at a time after window 1
+     (`sub_0019C740`, the shared reader's lock 0x494EF8) and runs the
+     per-frame update for all four (`sub_0019CF20`, after the world's wait
+     `sub_001AA920`). The section buffer pool (0x739B60: 19 + 35 slots, two
+     windows' worth) is swapped for each of windows 2 and 3 with its own
+     (10 + 18 buffers of contiguous memory above 32 MB, descriptors at
+     0x7BC000); a buffer a window frees (flag 2) is free again 3 frames
+     later. A car's view byte (+0x217, +0x4ACC) is its own window for P3 and
+     P4 (`sub_001177B0`, the resets `sub_0011A8F0` and `sub_0010EDF0`, and
+     the fallback "other view" marks `s4_view_other_a`/`_b`, which try the
+     car's own window first). `sub_0001A8F0` reads the old physics table
+     (`rel_sites` 0x1A8FE);
+   - views 3 and 4 draw the track of their own window;
+   - traffic: the traffic's start at the GO (`sub_001A28B0`) writes each
+     human's track section and spawn count into the streamer's two-entry
+     arrays (streamer `0x6137E0` + `0x363A7`, + `0x363A9`, a byte per
+     focus). For four humans it wrote players 3's and 4's over the traffic
+     car count (+ `0x363AB`) and no traffic came; it runs with the count at
+     two. The streamer spawns traffic around its two foci (players 1 and 2:
+     `sub_001A3110` per focus, ecx the focus's track section); after each of
+     its frames (`sub_001A20F0`) players 3 and 4 get the same call as foci 0
+     and 1, with their own zone and spawn-count bytes swapped in. Their
+     traffic is the same pool's and moves and leaves like any;
+   - cameras 3 and 4 take player 1's chosen view (camera + `0xC3C`: 2 or 5,
+     the two chase views, set for cameras 1 and 2 from the players' options
+     by `sub_00018910` and `sub_00020800`); with 0 the camera sat under the
+     car or far behind it;
    - HUD: the manager (0x54F900) has two panels (0x70 each) with its own
      fields right after them, so players 3 and 4 get a second manager
      (0x7B4000, built by the title's constructor `sub_000526C0` with its own
@@ -136,20 +172,31 @@ and the two player cameras move to a four-slot block.
      calls follow the first's (`sub_000535E0`, `sub_000536C0`,
      `sub_00053660`, `sub_00053620`, and `sub_00053D20` for a player's
      panel).
-4. Pads 3 and 4 driving (controls.c's gate, the setup records' ports).
+4. Pads 3 and 4 driving: done. With `RECOMP_USB_PADS=4` the emulated USB
+   host has four controllers; the third and fourth are the title's pad
+   ports 0 and 1 (the first two are ports 2 and 3, players 1 and 2), and
+   players 3 and 4 drive with them. `controls.c` maps those ports to host
+   pads 2 and 3 (the control scheme and the face layout for them too;
+   players 3 and 4 go by player 1's race state). `BO3_SPLIT4_AI` has the
+   AI drive player 3 (`3`), player 4 (`4`) or both (`1`) instead.
+   `BO3_SPLIT4_KEYS=3` (or `4`; unset, the first of players 3 and 4 the AI
+   does not drive; `0` off) splits the keyboard: while four race and
+   nobody has paused, the arrow keys drive player 3 (or 4) and no longer
+   player 1, who keeps W A S D and the other keys (`controls.c`, on the
+   title's read of each pad: the arrows' share taken off player 1's port
+   and put on that player's). On the arrows' player: Up the accelerator,
+   Down the brake, Left and Right steering, End or Period boost, Page Down
+   or Comma Crashbreaker, Home look back, Page Up change view. In menus and
+   the pause menu the arrows are player 1's as before.
 5. Results, sound.
 6. The front end: players 3 and 4 choose their cars (first: a setting).
 
 ## Known limitations
 
-- **Track streaming follows two cars.** The streamer (`sub_001A20F0`) keeps
-  two foci in fixed locals (two section words, a count of 2, two pointers)
-  and two windows (world + 0x12ADC8, 0x1CC each): it follows players 1 and 2
-  only (`immediates`: its loop ends after slot 1). Players 3 and 4 find
-  their ground in either window (the title's fallback switches a car's view
-  byte between 0 and 1); one far from both drives into track that is not
-  loaded and falls until the title puts it back. Four foci need that
-  function rewritten.
+- **Props and textures follow two cars.** The streamer (`sub_001A20F0`)
+  keeps two foci (players 1 and 2) for its zones of props and textures; the
+  track itself (stream windows) follows all four (see 3 above), so a car far
+  from players 1 and 2 has its ground but may show fewer props.
 
 ## Checks
 
@@ -162,14 +209,24 @@ not saved), the null backend for logic, Vulkan for pictures:
 
 `BO3_SPLIT4_LOG` writes, every 30 flips, the racer counts and each human
 slot (vtable, index, phase, place, AI byte, position), each car's track
-section and view byte (`sec`: -1 is no ground), the streamer's flags and
-each stream window's first section (`view`: -1 is not streaming).
+section and view byte (`sec`: -1 is no ground), the streamer's flags,
+each stream window's first section (`view`: -1 is not streaming), the
+traffic cars in use out of the pool and those within 250 of each player
+(`traffic ... near`) and each player's
+controller record (`pad`: the title's pad port).
 
 Four players (logic, the AI driving 3 and 4):
 
     SAVES=empty RECOMP_PB_BACKEND=null STOP_AT_END=1 DRIVE_SECS=60 \
         tools/headless/split_scene.sh runs/s4 race BO3_SPLIT4=1 \
         BO3_SPLIT4_AI=1 BO3_SPLIT4_LOG=$PWD/runs/s4/split4.txt
+
+Four players with four pads (pads 3 and 4 scripted too, `P4_HOLD=lt`
+backs player 4 up, to tell the pads apart):
+
+    SAVES=empty RECOMP_PB_BACKEND=null STOP_AT_END=1 DRIVE_SECS=40 P34=1 \
+        tools/headless/split_scene.sh runs/s5 race BO3_SPLIT4=1 \
+        RECOMP_USB_PADS=4 BO3_SPLIT4_LOG=$PWD/runs/s5/split4.txt
 
 `RECOMP_WATCH=0x73A1C0` names the writer of the player count (on Linux the
 toolkit now scans the guest stack for the chain).

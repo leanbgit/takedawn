@@ -16,7 +16,8 @@
       "hi": "0x004CFB18",
       "to": "0x0078A000",
       "size": "0x00000090",
-      "note": "The player setup records (0x24 each, two slots: +0 the profile, +0x18 the pad port, +0x1C, +0x20), filled by the stage set-up (sub_000209A0, unrolled) and pointed to by each human racer's +0x2470 (sub_001AACB0: 0x4CFAD0 + 0x24 x player). Four slots."
+      "base": "0x004A71A0",
+      "note": "The player setup records (0x24 each, two slots: +0 the controller record, 0x4AE724 + 0x188 n, whose pad the car drives with; +0x18 its number; +0x1C, +0x20), filled by the stage set-up (sub_000209A0, unrolled) and the app's (0x4A71A0 + 0x28930: sub_00015A60, sub_00015F10, sub_000165F0, hence the base) and pointed to by each human racer's +0x2470 (sub_001AACB0: 0x4CFAD0 + 0x24 x player). Four slots."
     },
     {
       "name": "cameras",
@@ -69,9 +70,10 @@
         "0x00110EDC",
         "0x00111151",
         "0x0011127D",
-        "0x001A99F2"
+        "0x001A99F2",
+        "0x0001A8FE"
       ],
-      "note": "The human cars' physics objects in the simulation (world + 0x3C910 = 0x64B310, + 0x1CB80, 0x4AD0 each, two slots; the AI cars' follow at + 0x26120). Its offsets are used by other structures too, so the object-relative rule applies only at the listed sites (sub_00110280, sub_00110420, sub_00111230, the world constructor's sub_001A99F0). Four slots."
+      "note": "The human cars' physics objects in the simulation (world + 0x3C910 = 0x64B310, + 0x1CB80, 0x4AD0 each, two slots; the AI cars' follow at + 0x26120). Its offsets are used by other structures too, so the object-relative rule applies only at the listed sites (sub_00110280, sub_00110420, sub_00111230, the world constructor's sub_001A99F0, sub_0001A8F0: a human's physics object by its index, used by the car update sub_0018C510). Four slots."
     }
   ],
   "immediates": [
