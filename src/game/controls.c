@@ -43,7 +43,7 @@
 #include "platform/recomp_patch.h"
 #include "recomp_types.h"
 #include "race_module.h"
-#include "split4.h"                    /* the arrows as player 3 or 4 */
+#include "split4/split4.h"             /* the arrows as player 3 or 4 */
 
 extern RECOMP_TLS uint32_t g_ebx, g_esi;
 extern ptrdiff_t g_xbox_mem_offset;
@@ -107,7 +107,7 @@ static int ctl_driving(void)
     return ctl_driving_for(0);
 }
 
-/* Four-player split screen, BO3_SPLIT4_KEYS (split4.c): while four race,
+/* Four-player split screen, BO3_SPLIT4_KEYS (split4/stage.c): while four race,
  * the arrow keys drive player 3 or 4 instead of player 1, who keeps W A S D
  * and the other keys. On the arrows' player's pad: Up the accelerator, Down
  * the brake, Left and Right the stick, End or Period boost (A), Page Down
@@ -257,7 +257,7 @@ static void ctl_pad(void)
      * 2 is the first host pad. */
     /* With four controllers (RECOMP_USB_PADS=4) the third and fourth are
      * the title's ports 0 and 1: players 3 and 4 of the four-player split
-     * screen (split4.c), who go by player 1's event. */
+     * screen (split4/stage.c), who go by player 1's event. */
     if (usb < 0)
         usb += 4;
     src = xbox_InputSources((DWORD)usb);

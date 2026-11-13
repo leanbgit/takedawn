@@ -48,6 +48,11 @@ void split4_render_views(void (*gen)(void));  /* sub_001AE2F0 */
 void split4_stream_ready(void (*gen)(void));  /* sub_001AA920 */
 void split4_traffic_init(void (*gen)(void));  /* sub_001A28B0 */
 void split4_streamer(void (*gen)(void));      /* sub_001A20F0 */
+void split4_engine_get(void (*gen)(void));    /* sub_0018C6F0 */
+void split4_camdb_get(void (*gen)(void));     /* sub_00160690 */
+void split4_sky_update(void (*gen)(void));
+void split4_camdb_put(void (*gen)(void));     /* sub_00160710 */
+void split4_nearest_listener(void (*gen)(void)); /* sub_001CA270 */
 void split4_carsel_event(void (*gen)(void));  /* sub_00066490 */
 void split4_hud_state(void (*gen)(void));     /* sub_00053D20 */
 void split4_hud_ctor(void (*gen)(void));      /* sub_000526C0 */

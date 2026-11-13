@@ -967,49 +967,73 @@
       "va": "0x00109DA7",
       "kind": "mark",
       "name": "s4_view_other_a",
-      "note": "sub_00109D20, a car's track contact: its own stream window (world + 0x12ADC8 + 0x1CC x the physics object's view byte +0x217, bl) has no section for it (0xFF), so on the two-player stage it tries 'the other player's' (`mov al, 1` at 0x109DA1, then this stage check, `cmp [0x4D5370], 0x4D4798 / jne 0x109DD7`, then `sub al, bl`; a mark runs after its instruction, and 0x109DD7 loads al afresh) and keeps it. With four windows 1 - view is -1 or -2 for players 3 and 4, before the array. BO3_SPLIT4: al = bl + (bl ^ 1), so the sub gives view ^ 1: the title's for 0 and 1, 3 and 2 for 2 and 3 (src/game/split4.c)."
+      "note": "sub_00109D20, a car's track contact: its own stream window (world + 0x12ADC8 + 0x1CC x the physics object's view byte +0x217, bl) has no section for it (0xFF), so on the two-player stage it tries 'the other player's' (`mov al, 1` at 0x109DA1, then this stage check, `cmp [0x4D5370], 0x4D4798 / jne 0x109DD7`, then `sub al, bl`; a mark runs after its instruction, and 0x109DD7 loads al afresh) and keeps it. With four windows 1 - view is -1 or -2 for players 3 and 4, before the array. BO3_SPLIT4: al = bl + (bl ^ 1), so the sub gives view ^ 1: the title's for 0 and 1, 3 and 2 for 2 and 3 (src/game/split4/streaming.c)."
     },
     {
       "va": "0x0011A69F",
       "kind": "mark",
       "name": "s4_view_other_b",
-      "note": "sub_0011A490: the same fallback as s4_view_other_a with the view byte in cl: after this `mov al, 1`, `sub al, cl`. BO3_SPLIT4: al = cl + (cl ^ 1) (src/game/split4.c)."
+      "note": "sub_0011A490: the same fallback as s4_view_other_a with the view byte in cl: after this `mov al, 1`, `sub al, cl`. BO3_SPLIT4: al = cl + (cl ^ 1) (src/game/split4/streaming.c)."
     },
     {
       "va": "0x001AA125",
       "kind": "mark",
       "name": "s4_stream_a",
-      "note": "sub_001AA100, the race world's load: after the dispatch's `mov esi, 2` (esi stays 2 for the whole function; a mark runs after its instruction). Steps 0x10 and 0x11 compare the human count with it (`cmp [0x73A1C0], esi`, 0x1AA3A7 and 0x1AA3E8): with two humans the track streamer's window 0 (world + 0x12ADC8) starts as one of two (sub_0019C740 ..., 1, 0) and window 1 (world + 0x12AF94) is started (..., 1, 1); otherwise window 0 alone. Without window 1 every car that looks its track up there (player 2's, and 3 and 4's, the title's view 1) has no ground. BO3_SPLIT4: at those two steps esi = the count when it is above 2, so four humans stream as two do, around players 1 and 2 (src/game/split4.c)."
+      "note": "sub_001AA100, the race world's load: after the dispatch's `mov esi, 2` (esi stays 2 for the whole function; a mark runs after its instruction). Steps 0x10 and 0x11 compare the human count with it (`cmp [0x73A1C0], esi`, 0x1AA3A7 and 0x1AA3E8): with two humans the track streamer's window 0 (world + 0x12ADC8) starts as one of two (sub_0019C740 ..., 1, 0) and window 1 (world + 0x12AF94) is started (..., 1, 1); otherwise window 0 alone. Without window 1 every car that looks its track up there (player 2's, and 3 and 4's, the title's view 1) has no ground. BO3_SPLIT4: at those two steps esi = the count when it is above 2, so four humans stream as two do, around players 1 and 2 (src/game/split4/streaming.c)."
     },
     {
       "va": "0x001AA3A2",
       "kind": "mark",
       "name": "s4_stream_b",
-      "note": "sub_001AA100, step 0x10 reached from step 0xF: after its `mov esi, 2`, the same as s4_stream_a (src/game/split4.c)."
+      "note": "sub_001AA100, step 0x10 reached from step 0xF: after its `mov esi, 2`, the same as s4_stream_a (src/game/split4/streaming.c)."
     },
     {
       "va": "0x001AA404",
       "kind": "mark",
       "name": "s4_stream_end",
-      "note": "sub_001AA100, step 0x12 (after step 0x11's compare): esi back to 2, the constant the rest of the function expects (src/game/split4.c)."
+      "note": "sub_001AA100, step 0x12 (after step 0x11's compare): esi back to 2, the constant the rest of the function expects (src/game/split4/streaming.c)."
     },
     {
       "va": "0x00017191",
       "kind": "mark",
       "name": "s4_cam_frame",
-      "note": "sub_000170B0, the app's frame: after the players' camera updates (sub_00167940, esi the camera, the frame's time on the stack, ret 4), one for camera 0 and one for camera 1, unrolled (0x1717A, 0x1718C), and the `pop esi` after them. BO3_SPLIT4 with four racing updates cameras 2 and 3 the same way here, with the same time (app + 0x2E210; edi the app) (src/game/split4.c)."
+      "note": "sub_000170B0, the app's frame: after the players' camera updates (sub_00167940, esi the camera, the frame's time on the stack, ret 4), one for camera 0 and one for camera 1, unrolled (0x1717A, 0x1718C), and the `pop esi` after them. BO3_SPLIT4 with four racing updates cameras 2 and 3 the same way here, with the same time (app + 0x2E210; edi the app) (src/game/split4/camera.c)."
     },
     {
       "va": "0x00016DAE",
       "kind": "mark",
       "name": "s4_cam_reset",
-      "note": "sub_00016D00: after the players' cameras' vtable + 4 (0x167BE0, a reset: ecx the camera, no arguments) for camera 0 and camera 1, unrolled, and the store after them (`mov [edi + 0x2E18C], ebx`). BO3_SPLIT4 with four racing does it for cameras 2 and 3 here (src/game/split4.c)."
+      "note": "sub_00016D00: after the players' cameras' vtable + 4 (0x167BE0, a reset: ecx the camera, no arguments) for camera 0 and camera 1, unrolled, and the store after them (`mov [edi + 0x2E18C], ebx`). BO3_SPLIT4 with four racing does it for cameras 2 and 3 here (src/game/split4/camera.c)."
     },
     {
       "va": "0x001AE37F",
       "kind": "mark",
       "name": "s4_env_view",
-      "note": "sub_001AE340, the stage render of one view (ebx the view): after `mov [0x60E170], ebx`, the current view of the object at 0x60E040 (+ 0x130), whose per-view entries (+ 0xB0, 0x40 each, two of them) come right before it; sub_001891F0 reads the current view's. Views 2 and 3 would read the index itself and the fields after it (view 3: no track drawn). BO3_SPLIT4: views 2 and 3 use entries 0 and 1 (view & 1) (src/game/split4.c)."
+      "note": "sub_001AE340, the stage render of one view (ebx the view): after `mov [0x60E170], ebx`, the current view of the object at 0x60E040 (+ 0x130), whose per-view entries (+ 0xB0, 0x40 each, two of them) come right before it; sub_001891F0 reads the current view's. Views 2 and 3 would read the index itself and the fields after it (view 3: no track drawn). BO3_SPLIT4: views 2 and 3 use entries 0 and 1 (view & 1) (src/game/split4/views.c)."
+    },
+    {
+      "va": "0x001CA557",
+      "kind": "mark",
+      "name": "s4_listeners",
+      "note": "sub_001CA530, the audio world's update (edi the world, 0x40B310): after its loop over the listeners (+ 0x520, two, the count at + 0x528; each one's vtable + 0 updates it from its camera). BO3_SPLIT4: players 3's and 4's listeners updated too (src/game/split4/sound.c)."
+    },
+    {
+      "va": "0x0013B3B2",
+      "kind": "mark",
+      "name": "s4_snd_set",
+      "note": "sub_0013B270, the race audio's car loop (ebp the engine block, 0x40E130): after `mov edx, [edx + 0x27D0]` (the human's player number), before `movss [ebp + edx*4 + 0x1E0], xmm1`, one float per player at 0x40E310, two of them: the bytes after them are a table the engine sound reads (0x40E318, sub_00136610). BO3_SPLIT4: players 3 and 4 store theirs at S4_SND_F instead (edx such that the address lands there) (src/game/split4/sound.c)."
+    },
+    {
+      "va": "0x001561DC",
+      "kind": "mark",
+      "name": "s4_snd_get",
+      "note": "sub_00155FD0, a loop over the players (ebx the player): after the `call 0x13BD0` just before `movss xmm0, [ebx*4 + 0x40E310]`, the float s4_snd_set keeps. BO3_SPLIT4: for players 3 and 4 ebx is set so that the read lands on S4_SND_F; s4_snd_get_end puts ebx back (src/game/split4/sound.c)."
+    },
+    {
+      "va": "0x001561E1",
+      "kind": "mark",
+      "name": "s4_snd_get_end",
+      "note": "sub_00155FD0: after that movss, ebx back to the player (s4_snd_get) (src/game/split4/sound.c)."
     },
     {
       "va": "0x0018C511",

@@ -46,7 +46,16 @@ if(ANDROID)
         soundbank.c
         traffic_bp.c
         hirefresh.c
-        split4.c
+        split4/core.c
+        split4/log.c
+        split4/stage.c
+        split4/cars.c
+        split4/car_select.c
+        split4/hud.c
+        split4/camera.c
+        split4/views.c
+        split4/streaming.c
+        split4/sound.c
         hraudit.c
     mixer.c
     gp_image.c
@@ -117,7 +126,16 @@ add_executable(burnout3
     soundbank.c
     traffic_bp.c
     hirefresh.c
-    split4.c
+    split4/core.c
+    split4/log.c
+    split4/stage.c
+    split4/cars.c
+    split4/car_select.c
+    split4/hud.c
+    split4/camera.c
+    split4/views.c
+    split4/streaming.c
+    split4/sound.c
     hraudit.c
     mixer.c
     gp_image.c

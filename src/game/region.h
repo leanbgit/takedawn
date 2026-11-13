@@ -33,7 +33,7 @@
 #else
 /* Four-player split screen (docs/split4.md): the lift moves the human
  * racers (0x73A1D0, two slots of 0x27E0) to 0x780000 (config/relocate.json,
- * src/game/split4.h), so the port's own C follows them here. Still a
+ * src/game/split4/split4.h), so the port's own C follows them here. Still a
  * constant expression. */
 #define BO3_SPLIT4_RELOC(va)                                                   \
     ((unsigned)(va) - 0x0073A1D0u < 0x00004FC0u                                \

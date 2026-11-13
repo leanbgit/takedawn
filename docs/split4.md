@@ -64,7 +64,7 @@ layout rectangles (`0x54F900 + 0x48 / + 0xB8`).
 **Relocation at lift time.** `config/relocate.json` moves each two-slot
 array into a block after the image (toolkit `tools/recomp/relocate.py`,
 `--relocate`; the runtime reserves the block, `g_xbox_image_extra`, and
-`src/game/split4.c` checks it is at `0x780000`). Every immediate and
+`src/game/split4/core.c` checks it is at `0x780000`). Every immediate and
 displacement inside the old array becomes the same offset in the new one,
 including world-relative ones (`[esi + 0x12B7D0]`), and a loop's end
 sentinel (`cmp esi, 0x73F190`) becomes the new end. The port's own C follows
@@ -82,6 +82,26 @@ The cameras: the app object (`0x4A71A0`) holds the players' cameras at
 two by the app constructor (`0x157D3: mov ebx, 2`). A third camera object
 follows (`0x4D13C0`); it is reached only by fixed addresses, so it stays put
 and the two player cameras move to a four-slot block.
+
+## The code
+
+`src/game/split4/`, one file a subject; `split4.h` is what the rest of the
+game calls (the wrappers in `recomp/recomp_manual.c`, `main.c`,
+`controls.c`), `split4_internal.h` what the files share (guest memory
+access, guest calls, the title's addresses more than one file uses).
+
+| File | What |
+|---|---|
+| `core.c` | the switches (`BO3_SPLIT4`, `_AI`, `_SKIP`), guest calls, start-up (each file registers its marks) |
+| `log.c` | the state log (`BO3_SPLIT4_LOG`, see Checks) |
+| `stage.c` | four humans on the two-player stage, setup records and pads, the arrow keys, the AI for players 3 and 4 |
+| `cars.c` | players 3's and 4's cars in the race (`BO3_SPLIT4_CARS`) |
+| `car_select.c` | players 3's and 4's turns at the car select |
+| `hud.c` | the second HUD manager, the quarters' layout and clip frames |
+| `camera.c` | players 3's and 4's chase cameras: mode switches, frame, reset, tuning per car, bind to their views |
+| `views.c` | the four views, their effects records, the split, their draw, the sky |
+| `streaming.c` | stream windows 3 and 4 and their pools, restart, traffic around players 3 and 4 |
+| `sound.c` | players 3's and 4's engines and listeners |
 
 ## Plan
 
@@ -111,7 +131,7 @@ and the two player cameras move to a four-slot block.
      so the setup relocation has the app as its base. Without it the front
      end's records stayed at the old address and players 1 and 2 both drove
      with player 1's pad (the two-player race included).
-   - four views (`split4.c`, the four-view part): views 3 and 4 built like
+   - four views (`split4/views.c`): views 3 and 4 built like
      the title's two (`sub_0002ECC0`), the split builder makes four quarter
      sub-rasters (`sub_0002F480`), the view select takes modes 3 and 4
      (`sub_0002F330`), the stage render draws views 2 and 3 after the
@@ -156,10 +176,22 @@ and the two player cameras move to a four-slot block.
      its frames (`sub_001A20F0`) players 3 and 4 get the same call as foci 0
      and 1, with their own zone and spawn-count bytes swapped in. Their
      traffic is the same pool's and moves and leaves like any;
+   - the pause menu's Restart starts windows 0 and 1 again (their state
+     `0x19`, then the load's start calls, `sub_0019C740`, on running
+     windows); windows 2 and 3 are reset (as a new race's) and started
+     again with them (`split4_win_start`); before this they kept their old
+     sections and players 3 and 4 fell through the track;
    - cameras 3 and 4 take player 1's chosen view (camera + `0xC3C`: 2 or 5,
      the two chase views, set for cameras 1 and 2 from the players' options
      by `sub_00018910` and `sub_00020800`); with 0 the camera sat under the
-     car or far behind it;
+     car or far behind it. A camera's bind (`sub_001674B0`) also takes its
+     car's camera tuning from two entries (`sub_00160690`, `[0x47A134]` +
+     `0x28D0` and + `0x2A80`, 0x1B0 each, by the car's id): a car that is
+     neither player 1's nor player 2's got none and its camera sat in the car
+     (camera + `0x4CC` 0). `split4_camdb_get` gives such a car one of two
+     more entries (`0x7BE500`, `0x7BE6B0`), filled as the title fills its
+     own (`sub_00160840`), and `split4_camdb_put` lets them go
+     (`sub_00160710`, `sub_00160AD0`);
    - HUD: the manager (0x54F900) has two panels (0x70 each) with its own
      fields right after them, so players 3 and 4 get a second manager
      (0x7B4000, built by the title's constructor `sub_000526C0` with its own
@@ -172,6 +204,27 @@ and the two player cameras move to a four-slot block.
      calls follow the first's (`sub_000535E0`, `sub_000536C0`,
      `sub_00053660`, `sub_00053620`, and `sub_00053D20` for a player's
      panel).
+     panel). Each panel also has a clip frame (panel + `0x64`, made by the
+     build's `sub_00053AA0` as the two-player halves, 640 by 240): a
+     widget's layers clip to its panel's frame (`sub_0004E360`, at the
+     widget's creation), and the boost bar with its flame and the award
+     messages are drawn through it (texts and plates are not). Players 1's
+     and 2's frames become the top quarters after the build; before this
+     player 2's was still the bottom half, under its top-right panel, and
+     its bar and messages were cut away. The second manager's panels get
+     frames of their own (the bottom quarters) before players 3's and 4's
+     widgets are made; they had none;
+   - the sky (`0x60E040`): its frame (`sub_00188D70`) works out, for each
+     human, the sky's colour at the human's place (`sub_00189940`) into an
+     entry per view (+ `0xB0`, 0x40 each, two of them) and the entry's
+     + `0x20` into the view's effects record (+ `0x90`). Players 3 and 4
+     wrote past the two entries, over the sky's own fields (the current
+     view, the sun's turn at + `0x134`, its state and the flags the stage
+     render reads at `0x60E17C` / `0x60E18C`), and into the render manager
+     (+ `0x3A0`, + `0x440`): the sun of players 1 and 2 moved with players
+     3 and 4. It runs for two now; players 3 and 4 have entries of their own
+     (`0x7BEA00`, worked out by the same call and set in for their views'
+     draws) and their effects records get theirs;
 4. Pads 3 and 4 driving: done. With `RECOMP_USB_PADS=4` the emulated USB
    host has four controllers; the third and fourth are the title's pad
    ports 0 and 1 (the first two are ports 2 and 3, players 1 and 2), and
@@ -188,7 +241,7 @@ and the two player cameras move to a four-slot block.
    Down the brake, Left and Right steering, End or Period boost, Page Down
    or Comma Crashbreaker, Home look back, Page Up change view. In menus and
    the pause menu the arrows are player 1's as before.
-5. Results, sound. Each race's end (window 1's release) and load (world
+5. Results. Each race's end (window 1's release) and load (world
    load step 1) start the streaming of players 3 and 4 afresh: windows 2
    and 3 as their init (`sub_0019C6E0`) leaves them, not started, the
    reader free, their buffer pools all free. The results' "race again"
@@ -235,6 +288,46 @@ and the two player cameras move to a four-slot block.
    starts as it did. Their picks go to `split4_choose_car` and win over
    `BO3_SPLIT4_CARS`, which stays for "race again" without the menu and as
    a fallback. B steps back through the turns.
+7. Sound for players 3 and 4. The race audio (manager `0x40E120`) builds
+   a listener for every human from that player's camera (`sub_0014C880`,
+   the sound object `0x40F270` + `0x250`, `0x40` each; with four, the last
+   two lie over a file name only the audio load uses, so nothing is lost),
+   and its "is this sound near a player" checks (`sub_001518F0` and its
+   sixteen callers) loop over every human: those take four as they are.
+   Two places were made for two:
+   - Engine sounds. A human's car takes one of two "player engine" objects
+     (vtable `0x3AD130`, at the engine block `0x40E130` + `0x210` and
+     + `0x3B0`, `0x1A0` each, in use at + `0xC5`; `sub_0018C6F0`), and
+     with both taken one of the rivals' five (`0x3AD15C`), so players 3
+     and 4 drove with a rival's engine: a rival's tuning and placed in the
+     world. `split4_engine_get` gives them two more player engines
+     (`0x7BE100`, `0x7BE2A0`), built as the audio manager builds its two
+     (`sub_00134FE0`: the vtable only) with + `0xC6` set (the player's own
+     engine: the attach picks the player's tuning by it, `sub_001371A0`,
+     and the engine's layers get the player's companions); one left from
+     the last race is let go first (a new racer starts with no engine,
+     `sub_0018D020`, without giving it back). Player 1's engine is the
+     title's richer one (the only one of its kind, its layers on mixbins 17
+     and 18, `docs/audio-gp.md`), in two-player races too: players 3 and 4
+     now sound as player 2 does.
+   - The positioned sounds (the other cars' engines, players 2 to 4's own
+     included, traffic, impacts) are placed and attenuated from the nearer
+     of the listeners the audio world (`0x40B310`) holds at + `0x520`: two
+     listener objects (`0x411E80`, `0x411E9C`; `0x3AD188`, + 8 a
+     DirectSound 3D object, + `0x10` the player's camera, bound by
+     `sub_0013FA60`, updated from the camera by `sub_0013FB30` in the
+     world's update `sub_001CA530`; `sub_001CA270` picks the nearer for a
+     point). Players 3's and 4's engines were heard from player 1's or 2's
+     camera, far away. Two more listener objects (`0x7BE900`, `0x7BE920`),
+     made as the title's are, bound to players 3 and 4, updated after the
+     title's (mark `s4_listeners`), and in `sub_001CA270`'s choice
+     (`split4_nearest_listener`). `BO3_SPLIT4_SKIP=listen34` turns them off.
+   - One float per player at `0x40E310` (the car loop `sub_0013B270`
+     writes it, `sub_00155FD0` reads it), two of them; the bytes after them
+     are a gear table the engine sound reads (`0x40E318`). Players 3's and
+     4's are kept at `0x7BE000` (marks `s4_snd_set`, `s4_snd_get`,
+     `s4_snd_get_end`). Before the engines above it was never written for
+     them (it is for player engines only).
 
 ## Known limitations
 
@@ -242,6 +335,9 @@ and the two player cameras move to a four-slot block.
   keeps two foci (players 1 and 2) for its zones of props and textures; the
   track itself (stream windows) follows all four (see 3 above), so a car far
   from players 1 and 2 has its ground but may show fewer props.
+- **One set of speakers.** All four share the speakers, as two do in the
+  title. Player 1's engine is the richer one (see 7 above); the sounds of
+  the world are placed by the title's own listener choice.
 
 ## Checks
 
@@ -257,7 +353,9 @@ slot (vtable, index, phase, place, AI byte, position), each car's track
 section and view byte (`sec`: -1 is no ground), the streamer's flags,
 each stream window's first section (`view`: -1 is not streaming), the
 traffic cars in use out of the pool and those within 250 of each player
-(`traffic ... near`) and each player's
+(`traffic ... near`), each player camera's view, state and eye from
+the car (`cam` view/state/height/distance: view 2 or 5, state 4 the
+chase, the eye about 1.5 above and 5 behind) and each player's
 controller record (`pad`: the title's pad port).
 
 Four players (logic, the AI driving 3 and 4):

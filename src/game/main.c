@@ -68,7 +68,7 @@ extern void xbox_InputPanicStop(int wait_ms);
 #include "recomp_icall_feedback.h"
 #include "kernel.h"
 #include "xbox_memory_layout.h"
-#include "split4.h"
+#include "split4/split4.h"
 #include "usb/ohci.h"
 #include "region.h"                   /* BO3_VA: NTSC-U or PAL addresses */
 #include "controls.h"                 /* input.control_scheme (BO-106) */

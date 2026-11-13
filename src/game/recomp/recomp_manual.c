@@ -309,8 +309,8 @@ void sub_001E15E0(void) { bo3_frame_sync_dirty(sub_001E15E0_gen); }
 void sub_001DD280(void) { bo3_frame_get_ltm(sub_001DD280_gen); }
 void sub_000303D0(void) { bo3_draw_vehicle(sub_000303D0_gen); }
 /* The HUD update: the high-refresh audit around it, and four players'
- * second manager after it (split4.c). */
-#include "../split4.h"
+ * second manager after it (split4/hud.c). */
+#include "../split4/split4.h"
 static void s4_hud_update_gen(void) { split4_hud_update(sub_000535E0_gen); }
 void sub_000535E0(void) { bo3_hud_update(s4_hud_update_gen); }
 void sub_00350DB0(void) { bo3_swap(sub_00350DB0_gen); }
@@ -503,10 +503,10 @@ void recomp_unimpl(const char *text, uint32_t va)
     if (stop) abort();
 }
 
-/* Four-player split screen (src/game/split4.c, docs/split4.md): the world's
+/* Four-player split screen (src/game/split4/, docs/split4.md): the world's
  * constructor, the stage's start and the two-player stage's set-up. With
  * BO3_SPLIT4 unset the generated bodies run as they are. */
-#include "../split4.h"
+#include "../split4/split4.h"
 extern void sub_001A9930_gen(void);
 extern void sub_00017450_gen(void);
 extern void sub_000209A0_gen(void);
@@ -531,6 +531,16 @@ extern void sub_001A28B0_gen(void);
 void sub_001A28B0(void) { split4_traffic_init(sub_001A28B0_gen); }  /* NTSC-U only */
 extern void sub_001A20F0_gen(void);
 void sub_001A20F0(void) { split4_streamer(sub_001A20F0_gen); }  /* NTSC-U only */
+extern void sub_0018C6F0_gen(void);
+void sub_0018C6F0(void) { split4_engine_get(sub_0018C6F0_gen); }  /* NTSC-U only */
+extern void sub_00188D70_gen(void);
+void sub_00188D70(void) { split4_sky_update(sub_00188D70_gen); }  /* NTSC-U only */
+extern void sub_00160690_gen(void);
+extern void sub_00160710_gen(void);
+void sub_00160690(void) { split4_camdb_get(sub_00160690_gen); }  /* NTSC-U only */
+void sub_00160710(void) { split4_camdb_put(sub_00160710_gen); }  /* NTSC-U only */
+extern void sub_001CA270_gen(void);
+void sub_001CA270(void) { split4_nearest_listener(sub_001CA270_gen); }  /* NTSC-U only */
 extern void sub_00066490_gen(void);
 void sub_00066490(void) { split4_carsel_event(sub_00066490_gen); }  /* NTSC-U only */
 extern void sub_00053D20_gen(void);
