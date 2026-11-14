@@ -51,6 +51,9 @@ void split4_streamer(void (*gen)(void));      /* sub_001A20F0 */
 void split4_engine_get(void (*gen)(void));    /* sub_0018C6F0 */
 void split4_camdb_get(void (*gen)(void));     /* sub_00160690 */
 void split4_sky_update(void (*gen)(void));
+/* the reflection cube: one per view, redrawn in turns (sub_00040B90, sub_0003FA20) */
+void split4_cube_create(void (*gen)(void));
+void split4_cube_draw(void (*gen)(void));
 void split4_camdb_put(void (*gen)(void));     /* sub_00160710 */
 void split4_nearest_listener(void (*gen)(void)); /* sub_001CA270 */
 void split4_carsel_event(void (*gen)(void));  /* sub_00066490 */

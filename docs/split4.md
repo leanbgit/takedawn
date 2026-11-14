@@ -99,7 +99,7 @@ access, guest calls, the title's addresses more than one file uses).
 | `car_select.c` | players 3's and 4's turns at the car select |
 | `hud.c` | the second HUD manager, the quarters' layout and clip frames |
 | `camera.c` | players 3's and 4's chase cameras: mode switches, frame, reset, tuning per car, bind to their views |
-| `views.c` | the four views, their effects records, the split, their draw, the sky |
+| `views.c` | the four views, their effects records, the split, their draw, the sky, a reflection cube per view |
 | `streaming.c` | stream windows 3 and 4 and their pools, restart, traffic around players 3 and 4 |
 | `sound.c` | players 3's and 4's engines and listeners |
 
@@ -362,6 +362,50 @@ access, guest calls, the title's addresses more than one file uses).
   so every view but the top-left one drew its flames in the wrong place
   (and the title's two-player view 1 in the top half). It is added now:
   patch `xboxrecomp-ff-viewport-offset.patch`.
+
+## Performance
+
+Measured on the user's desktop (Windows, Vulkan, render scale 3, SMAA, 16:9,
+60 fps split screen asked for), `RECOMP_TRACE=frametime=...,vk_frame=...,
+pb_split=...` and `tools/perf/framestats.py`, four cars driving:
+
+- **Where the time goes.** The GPU is nearly idle (about 2.4 ms a frame).
+  The title's own code takes about 4.5 ms a frame on its thread and D3D's
+  pushbuffer building about 1 ms. The rest is the runtime's executor
+  (pushbuffer decode and draws: about 21 ms, 15 ms of it in draws, about
+  4.5 us a draw) and the title waiting for it. A frame is the executor's
+  time *plus* the title's, not the larger of the two: each D3D KickOff
+  (`sub_00351490` -> `sub_00351A30` -> `sub_00351BD0`, about five a frame)
+  waits until the executor has finished what was kicked before
+  (`0x100410` bit 16; toolkit `src/kernel/xbox_memory_layout.c`, "The
+  KickOff flush": acknowledging it at once leaves D3D's MakeSpace blocked on
+  an interrupt the runtime does not raise). So fewer draws shorten both
+  halves of the frame.
+- **Reflection cubes (`views.c`).** The car's reflection cube (six
+  128x128 faces, `sub_0003FA20`; `docs/effects.md`) is one object for all
+  views, redrawn around each view's car before that view: 24 faces and
+  about 1,900 of a four-player frame's 3,950 draws. Views 1 to 3 get cubes
+  of their own (made by the title's `sub_00040B90` on scratch objects at
+  `0x7BEC00` at boot, the texture at cube object + `0xC0` and the six faces
+  at + `0xC8` set in at the view's cube call; the cars read + `0xC0` in
+  `sub_00031690`), and each view redraws its faces once every
+  `BO3_SPLIT4_CUBE` frames (default 4; `1` every frame, as shipped), the
+  views in turn; in between the cube call takes the title's own
+  no-reflection path (gate words `0x73A190` / `0x73A194` off for the call),
+  which leaves the faces as they were. Same track, same build:
+
+  | Cube redrawn | fps | frame p95 | draws a frame | passes |
+  |---|---|---|---|---|
+  | every frame (as shipped) | 29.1 | 39.0 ms | 3,951 | 65 |
+  | every 2nd frame | 36.0 | 36.6 ms | 2,972 | 48 |
+  | every 4th frame (default) | 39.4 | 33.0 ms | 2,533 | 40 |
+
+  The views' own draws (about 2,000) are unchanged. The HUD, its pop-ups
+  and boost bars are drawn after the views (2D scenes) and do not touch the
+  cube.
+- **Left:** the views' own draws (draw distance and detail settings change
+  them), and the runtime: the executor's cost a draw, and the KickOff wait
+  that keeps the title and the executor from overlapping.
 
 ## Known limitations
 

@@ -99,6 +99,7 @@ uint32_t s4_vcall_r(uint32_t obj, uint32_t off);
 
 uint32_t s4_view(unsigned k);  /* player k's view */
 uint32_t s4_fx(unsigned k);    /* player k's effects record */
+void split4_cube_reset(void);  /* a race's start: each view's cube drawn afresh */
 
 /* ---- cars.c ---- */
 

@@ -39,6 +39,7 @@ void split4_world_load(void (*gen)(void))
     if (!split4_enabled() || step != 1)
         return;
     s4_streams_reset();
+    split4_cube_reset();
     for (k = 2; k < SPLIT4_MAX_PLAYERS; k++) {
         uint32_t cam = S4_CAM + k * S4_CAM_SIZE;
         uint32_t a = g_eax, c = g_ecx, d = g_edx, sp = g_esp;

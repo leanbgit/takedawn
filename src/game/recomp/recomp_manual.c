@@ -320,7 +320,10 @@ void sub_000367C0(void) { bo3_spark_draw(sub_000367C0_gen); }
 void sub_0013EF40(void) { bo3_race_audio(sub_0013EF40_gen); }
 void sub_001CA530(void) { bo3_audio_world(sub_001CA530_gen); }
 void sub_00188750(void) { bo3_fx_clock(sub_00188750_gen); }
-void sub_0003FA20(void) { bo3_reflection_cube(sub_0003FA20_gen); }
+/* With four racing each view has its own cube, redrawn in turns
+ * (split4/views.c) around High refresh's own (hirefresh.c). */
+static void s4_cube_title(void) { bo3_reflection_cube(sub_0003FA20_gen); }
+void sub_0003FA20(void) { split4_cube_draw(s4_cube_title); }
 
 /* The front end's picture callbacks (BO-315, display.pictures in
  * ../main.c): the loading screen's and Crash Nav's pictures (0x1C1A60, which
@@ -535,6 +538,8 @@ extern void sub_0018C6F0_gen(void);
 void sub_0018C6F0(void) { split4_engine_get(sub_0018C6F0_gen); }  /* NTSC-U only */
 extern void sub_00188D70_gen(void);
 void sub_00188D70(void) { split4_sky_update(sub_00188D70_gen); }  /* NTSC-U only */
+extern void sub_00040B90_gen(void);
+void sub_00040B90(void) { split4_cube_create(sub_00040B90_gen); }  /* NTSC-U only */
 extern void sub_00160690_gen(void);
 extern void sub_00160710_gen(void);
 void sub_00160690(void) { split4_camdb_get(sub_00160690_gen); }  /* NTSC-U only */

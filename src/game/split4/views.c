@@ -215,6 +215,8 @@ static void s4_sky_swap(unsigned k)
     memcpy(b, t, sizeof t);
 }
 
+static void s4_cube_frame_end(void);
+
 /* sub_001AE2F0 (esi the world): the two-player stage draws views 0 and 1;
  * with four racing, views 2 and 3 are prepared (as sub_00020B30 prepares the
  * first two) and drawn the same way. */
@@ -223,8 +225,10 @@ void split4_render_views(void (*gen)(void))
     uint32_t world = g_esi;
     unsigned k;
     gen();
-    if (!s4_four_racing() || s4_skip("render"))
+    if (!s4_four_racing() || s4_skip("render")) {
+        s4_cube_frame_end();
         return;
+    }
     for (k = 2; k < SPLIT4_MAX_PLAYERS; k++) {
         uint32_t v = s4_view(k), human = SPLIT4_HUMAN + k * SPLIT4_HUMAN_SIZE;
         uint32_t a = g_eax, b = g_ebx, c = g_ecx, d = g_edx, si = g_esi, di = g_edi, sp = g_esp;
@@ -248,9 +252,148 @@ void split4_render_views(void (*gen)(void))
         s4_sky_swap(k);
         g_eax = a; g_ebx = b; g_ecx = c; g_edx = d; g_esi = si; g_edi = di; g_esp = sp;
     }
+    s4_cube_frame_end();
 }
 
 void s4_views_start_marks(void)
 {
     recomp_patch_on_mark("s4_env_view", split4_env_view);
+}
+
+/* ---- A reflection cube per view, redrawn in turns -----------------------
+ *
+ * The car's reflection cube (docs/effects.md): the render manager's cube
+ * object (S4_CUBE, manager + 0x9D0, made once at boot by sub_00040B90) has
+ * the cube texture at + 0xC0 and its six faces (surfaces into the texture's
+ * memory) at + 0xC8; sub_0003FA20 (stdcall: the manager, a point, the view)
+ * draws the six faces around the view's car at the start of every view's
+ * render, and the cars of that view read the texture at + 0xC0
+ * (sub_00031690). One cube for all views, so with four views 24 faces a
+ * frame: about 1,300 of a four-player frame's 3,500 draws.
+ *
+ * Views 1 to 3 get cubes of their own (made by the same sub_00040B90, on
+ * the scratch objects S4_CUBE_OBJ, right after the title's own at boot),
+ * set in at the view's cube call; a view redraws its faces once every
+ * s4_cube_every() frames (BO3_SPLIT4_CUBE, default 4: 1 is every frame,
+ * as shipped), the views in turn, and in between takes the title's own no-reflection
+ * path (the gate words 0x73A190 / 0x73A194 off for the call: the target is
+ * put back, the faces stay as last drawn). The title's cube is back in the
+ * object after the four views. Two racing, or a cube missing: as shipped.
+ *
+ * Measured on a desktop (Windows, Vulkan, render scale 3, SMAA; four cars
+ * driving on USA's Waterfront Westbound): every frame 29.1 fps and 3,951
+ * draws a frame, every 2nd 36.0 fps and 2,972, every 4th 39.4 fps and
+ * 2,533. The frame is the executor's time plus the title's (a kick waits
+ * for the executor, toolkit xbox_memory_layout.c), so fewer draws shorten
+ * both. */
+#define S4_CUBE          (S4_MGR + 0x9D0u)   /* the title's cube object */
+#define S4_CUBE_TEX      0xC0u               /* the cube texture */
+#define S4_CUBE_FACES    0xC8u               /* six faces */
+#define S4_CUBE_OBJ      0x007BEC00u         /* views 1 to 3's cube objects, 0x100 each */
+#define S4_CUBE_ON_A     0x0073A190u         /* the title's reflection gate */
+#define S4_CUBE_ON_B     0x0073A194u
+
+extern void sub_00040B90(void);
+
+static struct { uint32_t tex, face[6]; } s_cube[SPLIT4_MAX_PLAYERS];
+static int s_cube_ready;                     /* every view has its cube */
+static uint32_t s_cube_frame;
+static uint8_t s_cube_drawn[SPLIT4_MAX_PLAYERS];
+
+static unsigned s4_cube_every(void)
+{
+    static int v = -1;
+    if (v < 0) {
+        const char *e = getenv("BO3_SPLIT4_CUBE");
+        v = e && *e >= '1' && *e <= '8' ? *e - '0' : 4;
+    }
+    return (unsigned)v;
+}
+
+static void s4_cube_get(unsigned k, uint32_t obj)
+{
+    unsigned i;
+    s_cube[k].tex = S4_M32(obj + S4_CUBE_TEX);
+    for (i = 0; i < 6u; i++)
+        s_cube[k].face[i] = S4_M32(obj + S4_CUBE_FACES + i * 4u);
+}
+
+static void s4_cube_set(unsigned k)
+{
+    unsigned i;
+    S4_W32(S4_CUBE + S4_CUBE_TEX) = s_cube[k].tex;
+    for (i = 0; i < 6u; i++)
+        S4_W32(S4_CUBE + S4_CUBE_FACES + i * 4u) = s_cube[k].face[i];
+}
+
+/* sub_00040B90 (stdcall: the cube object): the title's cube, then three
+ * more for views 1 to 3. */
+void split4_cube_create(void (*gen)(void))
+{
+    uint32_t obj = S4_M32(g_esp + 4u);
+    unsigned k, i;
+    gen();
+    if (obj != S4_CUBE || !split4_enabled() || s4_skip("cube"))
+        return;
+    s4_cube_get(0, S4_CUBE);
+    s_cube_ready = s_cube[0].tex != 0;
+    for (k = 1; k < SPLIT4_MAX_PLAYERS && s_cube_ready; k++) {
+        uint32_t o = S4_CUBE_OBJ + (k - 1u) * 0x100u, arg = o;
+        memset((uint8_t *)(uintptr_t)g_xbox_mem_offset + o, 0, 0x100u);
+        s4_gcall(sub_00040B90, g_eax, g_ecx, g_edx, g_ebx, g_esi, g_edi, 1, &arg);
+        s4_cube_get(k, o);
+        if (!s_cube[k].tex)
+            s_cube_ready = 0;
+        for (i = 0; i < 6u; i++)
+            if (!s_cube[k].face[i])
+                s_cube_ready = 0;
+    }
+    fprintf(stderr, "[SPLIT4] reflection cubes per view: %s (texture %08X %08X %08X %08X)\n",
+            s_cube_ready ? "made" : "not made, one cube for all views",
+            s_cube[0].tex, s_cube[1].tex, s_cube[2].tex, s_cube[3].tex);
+}
+
+/* sub_0003FA20 (stdcall: the manager, a point, the view; ret 12). */
+void split4_cube_draw(void (*gen)(void))
+{
+    uint32_t k = S4_M32(g_esp + 12u), a, b;
+    unsigned n;
+    if (!s_cube_ready || k >= SPLIT4_MAX_PLAYERS || !s4_four_racing()) {
+        if (s_cube_ready)
+            s4_cube_set(0);
+        gen();
+        return;
+    }
+    s4_cube_set(k);
+    n = s4_cube_every();
+    if (n <= 1u || !s_cube_drawn[k] || s_cube_frame % n == k % n) {
+        s_cube_drawn[k] = 1;
+        gen();
+        return;
+    }
+    a = S4_M32(S4_CUBE_ON_A);
+    b = S4_M32(S4_CUBE_ON_B);
+    S4_W32(S4_CUBE_ON_A) = 0;
+    S4_W32(S4_CUBE_ON_B) = 0;
+    gen();
+    S4_W32(S4_CUBE_ON_A) = a;
+    S4_W32(S4_CUBE_ON_B) = b;
+}
+
+/* After the four views: the title's cube back in its object, the next
+ * frame's turn. A race's end forgets the faces (a new race draws each
+ * view's before using it). */
+static void s4_cube_frame_end(void)
+{
+    if (!s_cube_ready)
+        return;
+    s4_cube_set(0);
+    s_cube_frame++;
+}
+
+void split4_cube_reset(void)
+{
+    memset(s_cube_drawn, 0, sizeof s_cube_drawn);
+    if (s_cube_ready)
+        s4_cube_set(0);
 }
