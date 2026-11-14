@@ -246,3 +246,35 @@ void split4_stage_start(void (*gen)(void))
         S4_W32(mod + S4_CAR_PAINTS + 12u) = rpaint[1];
     }
 }
+
+/* ---- The AI racers' look at the humans ----
+ *
+ * An AI racer's driver (0x1580 bytes, vtable 0x3B1240; world + 0x26120)
+ * keeps a squared distance to each human at + 0x1560, two floats; its own
+ * car is at + 0x1568 (sub_001049A0 sets it). Its update (sub_00104A90)
+ * first looks at the humans (sub_00105BD0): for each of the 0x73A1C0 humans
+ * the distance goes to the next float, through a pointer that starts at
+ * + 0x1560 (two loops, one for a human car the AI drives, 0x105C83, one for
+ * a rival, 0x105DD3: `mov edx, [esp + ...]`, then `movss [edx], xmm4`).
+ * With four humans players 3's and 4's distances went over the car pointer
+ * and the float after it; the function, and sub_00106370 after it, then
+ * read the car through a float (the crash at sub_00106370 + 0x9C, at a
+ * race's start or later, wherever that float pointed). Only sub_00106370
+ * reads the floats, players 1's and 2's (by index & 1), so players 3's
+ * and 4's go to two spare floats instead (marks s4_ai_near_a, _b, after
+ * the load of the pointer). */
+#define S4_AI_NEAR       0x007BEB00u   /* players 3's and 4's distances, unread */
+#define S4_AI_DIST       0x1560u
+
+static void split4_ai_near(void)
+{
+    uint32_t off = g_edx - g_esi;
+    if (off >= S4_AI_DIST + 8u && off < S4_AI_DIST + 16u)
+        g_edx = S4_AI_NEAR + (off - S4_AI_DIST - 8u);
+}
+
+void s4_cars_start_marks(void)
+{
+    recomp_patch_on_mark("s4_ai_near_a", split4_ai_near);
+    recomp_patch_on_mark("s4_ai_near_b", split4_ai_near);
+}

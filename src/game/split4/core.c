@@ -149,6 +149,7 @@ void split4_start(void)
     s4_views_start_marks();
     s4_sound_start_marks();
     s4_stage_start_marks();
+    s4_cars_start_marks();
 }
 
 /* The guest call chain off the guest stack (return addresses the lifted code

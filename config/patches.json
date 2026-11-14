@@ -70,10 +70,12 @@
         "reg": "edi",
         "in": [
           "0x0054F914",
-          "0x0054F984"
+          "0x0054F984",
+          "0x007B4014",
+          "0x007B4084"
         ]
       },
-      "note": "sub_001C17A0, the 2D scene's root sync (PS2 CGt2dScene::Render's CGt2dFrame::Sync of the root, with the identity space): copies the root frame's local position to its world position (x here), then syncs the children (sub_001C1670: world = parent origin + parent scale * local). Three scenes use it; edi is the scene, and the patch is for the two HUD scenes only (CB3HUDManager at 0x54F900, one CB3HUD of 0x70 bytes per player from +0x10, its CGt2dScene at +4: 0x54F914, 0x54F984; rendered by sub_000536C0). The front-end scene (0x557A20: menus, loading screen, race intro, results) and the EA Trax scene (0x45BAD0) have patches of their own at this site (below). Origin x = 320*(1 - s): with the scale below, the HUD's 2D space is squeezed by s about the screen centre. PS2 counterpart: hudOrigin, written to the two HUD frames (0x6682B0, 0x669B30). Latch use: follows the choice the layout rectangle was built with."
+      "note": "sub_001C17A0, the 2D scene's root sync (PS2 CGt2dScene::Render's CGt2dFrame::Sync of the root, with the identity space): copies the root frame's local position to its world position (x here), then syncs the children (sub_001C1670: world = parent origin + parent scale * local). Three scenes use it; edi is the scene, and the patch is for the two HUD scenes only (CB3HUDManager at 0x54F900, one CB3HUD of 0x70 bytes per player from +0x10, its CGt2dScene at +4: 0x54F914, 0x54F984; rendered by sub_000536C0). The front-end scene (0x557A20: menus, loading screen, race intro, results) and the EA Trax scene (0x45BAD0) have patches of their own at this site (below). Origin x = 320*(1 - s): with the scale below, the HUD's 2D space is squeezed by s about the screen centre. PS2 counterpart: hudOrigin, written to the two HUD frames (0x6682B0, 0x669B30). Latch use: follows the choice the layout rectangle was built with. The four-player split screen's second HUD manager (0x7B4000, players 3 and 4: src/game/split4/hud.c) has its two scenes at 0x7B4014 and 0x7B4084, squeezed the same way."
     },
     {
       "va": "0x001C17A3",
@@ -101,7 +103,9 @@
         "reg": "edi",
         "in": [
           "0x0054F914",
-          "0x0054F984"
+          "0x0054F984",
+          "0x007B4014",
+          "0x007B4084"
         ]
       },
       "note": "sub_001C17A0: the root frame's local x scale, copied to its world scale. s = (4/3)/aspect for the two HUD scenes: every HUD object's position and size (and its text, which scales with the object space) is multiplied by it. PS2 counterpart: the HUD scale that follows from the fix's 1/width (0x4E105C)."
@@ -974,6 +978,18 @@
       "kind": "mark",
       "name": "s4_view_other_b",
       "note": "sub_0011A490: the same fallback as s4_view_other_a with the view byte in cl: after this `mov al, 1`, `sub al, cl`. BO3_SPLIT4: al = cl + (cl ^ 1) (src/game/split4/streaming.c)."
+    },
+    {
+      "va": "0x00105C83",
+      "kind": "mark",
+      "name": "s4_ai_near_a",
+      "note": "sub_00105BD0 (an AI driver's look at the humans, from its update sub_00104A90), the loop for a human car the AI drives: `mov edx, [esp + 0x18]`, the pointer to human i's float in the driver's two (+ 0x1560), then `movss [edx], xmm4` stores the squared distance. With four humans players 3's and 4's land on the driver's car pointer (+ 0x1568) and the float after it, and sub_00106370 then reads the car through a float (the crash at sub_00106370 + 0x9C). BO3_SPLIT4: edx past the two floats goes to two spare ones, which nothing reads (src/game/split4/cars.c)."
+    },
+    {
+      "va": "0x00105DD3",
+      "kind": "mark",
+      "name": "s4_ai_near_b",
+      "note": "sub_00105BD0, the same loop for a rival: `mov edx, [esp + 0x1c]`, then `movss [edx], xmm4` (s4_ai_near_a)."
     },
     {
       "va": "0x001AA125",

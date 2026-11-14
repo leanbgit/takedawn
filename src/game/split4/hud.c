@@ -164,19 +164,24 @@ static void s4_hud_clip_set(uint32_t r, float x, float y, float w, float h)
 void split4_hud_build(void (*gen)(void))
 {
     uint32_t m = g_ebx, k, r, n, sv, f;
-    float cw = 640.0f, ch = 240.0f;
+    float cx = 0.0f, cw = 640.0f, ch = 240.0f;
     gen();
     if (m != S4_HUD || !s4_four_racing() || S4_M32(m + 0x170u) != 2u)
         return;
-    /* players 1's and 2's clip frames: the top quarters */
+    /* players 1's and 2's clip frames: the top quarters. The build's top
+     * half gives the picture's span in the HUD's units: x 0 and width 640
+     * in 4:3; with display.hud_fix (the patches in sub_00052AB0) the
+     * wider picture's, x (640 - W)/2 and width W = 480 x aspect, which the
+     * scene's squeeze brings back to the screen's edges. */
     f = S4_M32(m + 0x64u);
     if (f && S4_MF(f + 8u) > 0.0f && S4_MF(f + 0xCu) > 0.0f) {
+        cx = S4_MF(f);
         cw = S4_MF(f + 8u);
         ch = S4_MF(f + 0xCu);
     }
     if (!s4_skip("clip")) {
-        s4_hud_clip_set(m, 0.0f, 0.0f, cw * 0.5f, ch);
-        s4_hud_clip_set(m + S4_HUD_REC, cw * 0.5f, 0.0f, cw * 0.5f, ch);
+        s4_hud_clip_set(m, cx, 0.0f, cw * 0.5f, ch);
+        s4_hud_clip_set(m + S4_HUD_REC, cx + cw * 0.5f, 0.0f, cw * 0.5f, ch);
     }
     if (!s_hud2 || s4_skip("hud2"))
         return;
@@ -198,7 +203,7 @@ void split4_hud_build(void (*gen)(void))
         /* players 3's and 4's clip frames, the bottom quarters, before
          * their widgets are made (they take it then) */
         if (!s4_skip("clip"))
-            s4_hud_clip_new(r, k ? cw * 0.5f : 0.0f, ch, cw * 0.5f, ch);
+            s4_hud_clip_new(r, cx + (k ? cw * 0.5f : 0.0f), ch, cw * 0.5f, ch);
     }
     sv = S4_M32(S4_HUD2 + 0x90u);
     S4_W32(S4_HUD2 + 0x90u) = 2;     /* the count the creation reads */

@@ -111,6 +111,7 @@ void s4_streams_reset(void);   /* windows 2 and 3 stopped, their pools free */
 /* ---- each file's marks (config/patches.json), registered by split4_start ---- */
 
 void s4_stage_start_marks(void);
+void s4_cars_start_marks(void);
 void s4_camera_start_marks(void);
 void s4_views_start_marks(void);
 void s4_streaming_start_marks(void);

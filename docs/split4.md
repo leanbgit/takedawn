@@ -95,7 +95,7 @@ access, guest calls, the title's addresses more than one file uses).
 | `core.c` | the switches (`BO3_SPLIT4`, `_AI`, `_SKIP`), guest calls, start-up (each file registers its marks) |
 | `log.c` | the state log (`BO3_SPLIT4_LOG`, see Checks) |
 | `stage.c` | four humans on the two-player stage, setup records and pads, the arrow keys, the AI for players 3 and 4 |
-| `cars.c` | players 3's and 4's cars in the race (`BO3_SPLIT4_CARS`) |
+| `cars.c` | players 3's and 4's cars in the race (`BO3_SPLIT4_CARS`), the AI rivals' distances to them |
 | `car_select.c` | players 3's and 4's turns at the car select |
 | `hud.c` | the second HUD manager, the quarters' layout and clip frames |
 | `camera.c` | players 3's and 4's chase cameras: mode switches, frame, reset, tuning per car, bind to their views |
@@ -213,7 +213,15 @@ access, guest calls, the title's addresses more than one file uses).
      player 2's was still the bottom half, under its top-right panel, and
      its bar and messages were cut away. The second manager's panels get
      frames of their own (the bottom quarters) before players 3's and 4's
-     widgets are made; they had none;
+     widgets are made; they had none. With `display.hud_fix` (widescreen)
+     the title's halves span the wider picture in the HUD's units (x
+     (640 - W)/2, width W = 480 x aspect, patches in `sub_00052AB0`) and
+     each HUD scene is squeezed back by (4/3)/aspect (`sub_001C17A0`'s
+     patches, for the scenes listed there): the quarters' frames start
+     from the half's x, and the second manager's scenes (`0x7B4014`,
+     `0x7B4084`) are in those patches' lists. Without that every boost bar
+     was cut away and players 3's and 4's HUDs were drawn unsqueezed
+     (positions and the lap counter off their quarters);
    - the sky (`0x60E040`): its frame (`sub_00188D70`) works out, for each
      human, the sky's colour at the human's place (`sub_00189940`) into an
      entry per view (+ `0xB0`, 0x40 each, two of them) and the entry's
@@ -225,6 +233,19 @@ access, guest calls, the title's addresses more than one file uses).
      3 and 4. It runs for two now; players 3 and 4 have entries of their own
      (`0x7BEA00`, worked out by the same call and set in for their views'
      draws) and their effects records get theirs;
+   - the AI rivals' look at the humans (`sub_00105BD0`, from an AI
+     driver's update `sub_00104A90`; the drivers are 0x1580 bytes at
+     world + `0x26120`, vtable `0x3B1240`): each human's squared distance
+     goes to the driver's two floats at + `0x1560`, and players 3's and 4's
+     went over the driver's own car pointer (+ `0x1568`, set by
+     `sub_001049A0`) and the float after it. The function and
+     `sub_00106370` then read the car through a float: the rivals drove on
+     garbage and the race crashed (at `sub_00106370` + `0x9C`) whenever that
+     float was no readable address, at the start or later (found with
+     `RECOMP_WATCH=0x00673F18`, rival 2's pointer). Players 3's and 4's
+     distances go to two spare floats now (`0x7BEB00`, marks `s4_ai_near_a`
+     and `_b`, `cars.c`); only `sub_00106370` reads the floats, players 1's
+     and 2's;
 4. Pads 3 and 4 driving: done. With `RECOMP_USB_PADS=4` the emulated USB
    host has four controllers; the third and fourth are the title's pad
    ports 0 and 1 (the first two are ports 2 and 3, players 1 and 2), and
@@ -328,6 +349,19 @@ access, guest calls, the title's addresses more than one file uses).
      4's are kept at `0x7BE000` (marks `s4_snd_set`, `s4_snd_get`,
      `s4_snd_get_end`). Before the engines above it was never written for
      them (it is for player engines only).
+
+## In the runtime (xboxrecomp)
+
+- **Glows and particles off the first view.** The boost flames, the lens
+  flare and the sparks are drawn in fixed-function mode with XDK D3D's
+  composite matrix (`sub_001871E0` queues the flames in the effects manager
+  `0x5A9A00`, `sub_00042BC0` draws each queue for each view). The composite
+  holds the projection and the viewport scale but not the viewport's corner
+  (`SET_VIEWPORT_OFFSET`, which the transform unit adds after the divide).
+  The runtime's `ff_transform` (`src/kernel/nv2a_pb_exec.c`) left it out,
+  so every view but the top-left one drew its flames in the wrong place
+  (and the title's two-player view 1 in the top half). It is added now:
+  patch `xboxrecomp-ff-viewport-offset.patch`.
 
 ## Known limitations
 
