@@ -35,6 +35,45 @@
 > data from there. Please do not ask for game files or disc images,
 > and do not share them. See the full [legal notice](#legal-notice).
 
+## This fork: four-player split screen
+
+This repository (leanbgit/takedawn) is a fork of
+[Takedawn](https://github.com/xenophobentx/takedawn) that adds a
+**four-player split screen** to the game's Multiplayer races: four views,
+one per quarter of the screen, each player with their own car, pad, camera
+and HUD. It is not made or supported by the Takedawn project; report
+problems with it [here](https://github.com/leanbgit/takedawn/issues), not
+upstream.
+
+- **Download:** `Takedawn-0.3.1-4p-windows-x64-portable.zip` from this
+  fork's [releases page](https://github.com/leanbgit/takedawn/releases).
+  Windows only, a portable folder: unzip it, start `Takedawn.exe`, and
+  install the data from your own disc in the setup window, as in Takedawn.
+- **Disc:** four players need the North America (NTSC-U) disc. The European
+  discs work, with two players as in Takedawn 0.3.1.
+- **Turn it on:** add this to `settings.toml` (in `data\Saves` beside
+  `Takedawn.exe`) and start the game:
+
+  ```toml
+  [splitscreen]
+  players = 4            # 2 is the game as shipped
+  ai_players = "none"    # or "3", "4", "34": the game's AI drives them
+  keyboard_player = 1    # the keyboard is player 1's; 3 or 4: the arrows drive that player
+  run_ahead = true       # about 60 fps with four players instead of about 43
+  ```
+
+  Then Multiplayer > Race. Each controller becomes the next free player at
+  its first button press (player 1's first); the keyboard drives player 1
+  too. With three controllers, `[input] first_pad = "player2"` makes the
+  keyboard player 1 and the controllers players 2 to 4.
+- **Known limitations:** the results screen lists players 1 and 2 only;
+  Eliminator's rule was written for two players; props and textures stream
+  around players 1 and 2; all four share one set of speakers.
+
+The rest of this page is Takedawn's own and describes Takedawn 0.3.1.
+How the split screen works: [docs/split4.md](docs/split4.md). Building
+it needs a patched toolkit: see "Building this branch" there.
+
 TL;DR
 
 - This is a port, not a remaster. It runs the original 2004 game with its

@@ -1,15 +1,47 @@
-# Four-player split screen (work in progress)
+# Four-player split screen
 
 Goal: the title's two-player split screen with four players, one view in
 each quarter of the screen, each player with their own pad and car, exactly
 as the two-player stage behaves today.
 
-Status: step 3 in progress. With `BO3_SPLIT4=1` the two-player stage
-races four humans and two AI rivals to the end without a fault (headless,
-null backend, players 3 and 4 driven by their pads with
-`RECOMP_USB_PADS=4`, or by the title's AI with `BO3_SPLIT4_AI=1`), four
-views, four HUDs, the track streamed around each player. Without `BO3_SPLIT4` two
-players race as before.
+Status: playable (North America disc). Four humans (or the title's AI for
+players 3 and 4) race the two-player stage to the end, four views, four
+HUDs, the track streamed around each player, about 59 fps with run-ahead.
+Without `[splitscreen] players = 4` (or `BO3_SPLIT4`) two players race as
+before. What is left: [Known limitations](#known-limitations) and step 5
+(the finish rule, the results screens).
+
+## Turning it on
+
+`settings.toml`, read at start by `settings.c` (after the toolkit's own
+settings, which keep the section through every save):
+
+    [splitscreen]
+    players = 4            # 2 (the title's own split screen) or 4
+    ai_players = "none"    # "3", "4" or "34": the title's AI drives them
+    keyboard_player = 1    # 1: the keyboard is player 1's (default); 3 or 4: the arrows in the race
+    cars = "copy"          # players 3's and 4's cars before they pick (BO3_SPLIT4_CARS)
+    run_ahead = true       # RECOMP_RUN_AHEAD: the GPU a frame behind the title
+
+`players = 4` sets `BO3_SPLIT4=4`, `RECOMP_USB_PADS=4` and (unless
+`run_ahead = false`) `RECOMP_RUN_AHEAD=1`; the others set `BO3_SPLIT4_AI`,
+`BO3_SPLIT4_KEYS` and `BO3_SPLIT4_CARS`. A variable already in the
+environment wins over the file. The European discs' programs say so in the
+log and ignore the section.
+
+## Releases
+
+The fork's Windows download is one portable zip,
+`Takedawn-<version>-windows-x64-portable.zip`, made by
+`tools/release/build-windows-4p.sh`: the North America program built here
+(with `TAKEDAWN_PKG_REGIONS=NTSC-U` for `gen.sh` and `build-windows.sh`), and
+everything else (the European programs, the setup window and its Qt files,
+SDL2, the upscaler, the shaders) from an installed upstream 0.3.1 named by
+`TAKEDAWN_UPSTREAM_WIN`. `portable.txt` keeps the data and saves in `data\`
+beside the program. The in-game update check asks `leanbgit/takedawn`.
+
+    TAKEDAWN_PKG_REGIONS=NTSC-U tools/release/gen.sh
+    TAKEDAWN_UPSTREAM_WIN=<upstream folder> tools/release/build-windows-4p.sh
 
 ## Building this branch
 
@@ -102,6 +134,7 @@ access, guest calls, the title's addresses more than one file uses).
 | `views.c` | the four views, their effects records, the split, their draw, the sky, a reflection cube per view |
 | `streaming.c` | stream windows 3 and 4 and their pools, restart, traffic around players 3 and 4 |
 | `sound.c` | players 3's and 4's engines and listeners |
+| `settings.c` | the `[splitscreen]` section of `settings.toml` into the switches |
 
 ## Plan
 
@@ -421,6 +454,11 @@ pb_split=...` and `tools/perf/framestats.py`, four cars driving:
 
 ## Known limitations
 
+- **Results for two.** The results screens list players 1 and 2 only.
+- **Eliminator's rule.** The race end loop (`sub_00025050`) counts all
+  humans, so a Race ends when all four have finished. Eliminator's rule
+  (`sub_00024400`, likely) looks at players 1 and 2 only. Road Rage has not
+  been played to its end with four.
 - **Props and textures follow two cars.** The streamer (`sub_001A20F0`)
   keeps two foci (players 1 and 2) for its zones of props and textures; the
   track itself (stream windows) follows all four (see 3 above), so a car far

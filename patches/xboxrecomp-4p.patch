@@ -1,17 +1,614 @@
-From: Four-player split screen (takedawn branch 4p-splitscreen)
-Subject: [PATCH] recomp: lift-time relocation of fixed guest arrays (--relocate)
-
-Against xboxrecomp takedawn-0.3.1. --relocate (tools/recomp/relocate.py):
-ranges, object-relative offsets (all sites or listed rel_sites), loop ends,
-listed immediates; g_xbox_image_extra; the POSIX RECOMP_WATCH guest chain.
-Apply with patches/apply-toolkit.sh.
-
----
+diff --git a/src/kernel/kernel.h b/src/kernel/kernel.h
+index aa2ec39..1231887 100644
+--- a/src/kernel/kernel.h
++++ b/src/kernel/kernel.h
+@@ -825,6 +825,9 @@ NTSTATUS __stdcall xbox_NtCreateMutant(PHANDLE MutantHandle, PXBOX_OBJECT_ATTRIB
+ NTSTATUS __stdcall xbox_NtReleaseMutant(HANDLE MutantHandle, PLONG PreviousCount);
+ 
+ LONG     __stdcall xbox_KeSetEvent(PVOID Event, LONG Increment, BOOLEAN Wait);
++/* KeSetEvent on a guest KEVENT from a host thread (kernel_bridge.c): 1 when
++ * set, 0 when guest_va is not a mapped KEVENT. */
++int xbox_KeSetEventHost(uint32_t guest_va);
+ NTSTATUS __stdcall xbox_KeWaitForSingleObject(PVOID Object, ULONG WaitReason, KPROCESSOR_MODE WaitMode, BOOLEAN Alertable, PLARGE_INTEGER Timeout);
+ NTSTATUS __stdcall xbox_KeWaitForMultipleObjects(ULONG Count, PVOID Objects[], ULONG WaitType, ULONG WaitReason, KPROCESSOR_MODE WaitMode, BOOLEAN Alertable, PLARGE_INTEGER Timeout, PVOID WaitBlockArray);
+ 
+diff --git a/src/kernel/kernel_bridge.c b/src/kernel/kernel_bridge.c
+index 4fbd03a..c947fa4 100644
+--- a/src/kernel/kernel_bridge.c
++++ b/src/kernel/kernel_bridge.c
+@@ -2026,6 +2026,83 @@ static void bridge_KeSetEvent(void)
+         g_eax = 0;
+ }
+ 
++/* KeSetEvent from a host thread: a guest KEVENT signalled on the title's
++ * behalf by the runtime, which stands in for hardware whose interrupt
++ * handler would have set it (nv2a_pb_exec.c: the GPU's software methods).
++ * The same as the guest's own KeSetEvent, without its stack frame or the
++ * wake trace's caller. Returns 1 when an event was set. */
++/* An event the runtime sets this way may be re-armed by the title the way
++ * hardware lets it: by writing 0 into its SignalState in memory, with no
++ * kernel call (XDK D3D's BlockOnTime, Burnout 3 0x00351820, before it puts
++ * its NOP 5 in the push buffer). The host event behind it would stay set,
++ * and the next wait on it would return at once, before the GPU got there
++ * (roadmap step 5: the menu movie's push buffer reused while the walker
++ * still had it to read). So a wait on one of these events first resets the
++ * host event when the guest's SignalState says 0 -- under the same lock the
++ * setter takes around "SignalState = 1; SetEvent", so a set that lands
++ * between the check and the reset cannot be lost. */
++#define KE_HOST_SET_MAX 8
++static uint32_t s_host_set_va[KE_HOST_SET_MAX];
++static int s_host_set_n;
++static CRITICAL_SECTION s_host_set_cs;
++static volatile LONG s_host_set_init;
++
++static void host_set_lock(void)
++{
++    if (InterlockedCompareExchange(&s_host_set_init, 1, 0) == 0) {
++        InitializeCriticalSection(&s_host_set_cs);
++        InterlockedExchange(&s_host_set_init, 2);
++    }
++    while (s_host_set_init != 2)
++        Sleep(0);
++    EnterCriticalSection(&s_host_set_cs);
++}
++
++static int host_set_known(uint32_t guest_va)
++{
++    int n = s_host_set_n;
++    for (int i = 0; i < n; i++)
++        if (s_host_set_va[i] == guest_va)
++            return 1;
++    return 0;
++}
++
++int xbox_KeSetEventHost(uint32_t guest_va)
++{
++    HANDLE h;
++    int ok;
++
++    if (!guest_va || !bridge_va_mapped(guest_va, 16) || BRIDGE_MEM8(guest_va) > 1)
++        return 0;                       /* not a KEVENT */
++    h = ke_event_shadow(guest_va);
++    if (!h)
++        return 0;
++    host_set_lock();
++    if (!host_set_known(guest_va) && s_host_set_n < KE_HOST_SET_MAX)
++        s_host_set_va[s_host_set_n++] = guest_va;
++    ke_event_mirror(guest_va, h, 1);   /* (the wake trace is guest threads') */
++    ok = SetEvent(h) ? 1 : 0;
++    LeaveCriticalSection(&s_host_set_cs);
++    return ok;
++}
++
++/* Before a wait: re-armed in memory means re-armed (above). */
++static void host_set_rearm(uint32_t guest_va, HANDLE h)
++{
++    static unsigned rearms;
++    if (!s_host_set_n || !host_set_known(guest_va))
++        return;
++    host_set_lock();
++    if (BRIDGE_MEM32(guest_va + 4) == 0 && WaitForSingleObject(h, 0) == WAIT_OBJECT_0) {
++        ResetEvent(h);
++        if (rearms++ < 4)
++            fprintf(stderr, "  [KERNEL] KEVENT 0x%08X re-armed in memory by the title:"
++                    " stale host signal cleared before its wait (%u so far)\n",
++                    guest_va, rearms);
++    }
++    LeaveCriticalSection(&s_host_set_cs);
++}
++
+ /* ── KeWaitForSingleObject (ordinal 159) ─────────────────── */
+ static void bridge_KeWaitForSingleObject(void)
+ {
+@@ -2042,6 +2119,7 @@ static void bridge_KeWaitForSingleObject(void)
+     if (!h)
+         h = XBOX_TO_NATIVE(object);
+ 
++    host_set_rearm(object, h);
+     xbox_WakeWaitBegin(h, g_xbox_kernel_caller);
+     g_eax = (uint32_t)xbox_KeWaitForSingleObject(
+         h, wait_reason, wait_mode,
+diff --git a/src/kernel/kernel_pacing.c b/src/kernel/kernel_pacing.c
+index 929de8d..6b2eade 100644
+--- a/src/kernel/kernel_pacing.c
++++ b/src/kernel/kernel_pacing.c
+@@ -18,6 +18,7 @@
+  */
+ #include "kernel.h"
+ #include "kernel_pacing.h"
++#include "xbox_memory_layout.h"   /* xbox_Nv2aRunAheadKick */
+ #include "power_auto.h"
+ #include "pacing_watch.h"
+ #include "kernel_pause.h"
+@@ -666,6 +667,9 @@ void xbox_SpinWait(uint32_t va)
+      * spinning here at DISPATCH takes a posted interrupt, as a CPU would.
+      * At "spin" pacing the macro calls only for that. */
+     xbox_IrqSafePoint();
++    /* RECOMP_RUN_AHEAD: a KickOff waiting on its flush has it now
++     * (xbox_memory_layout.c); one load when off. */
++    xbox_Nv2aRunAheadKick();
+ #if !defined(_WIN32)
+     /* And a hand-over point for guest_cpus=token (kernel_thread.c): a loop
+      * still waiting lets a thread that wants the guest CPU run now rather
+diff --git a/src/kernel/nv2a_pb_exec.c b/src/kernel/nv2a_pb_exec.c
+index 243d44f..f5d46ba 100644
+--- a/src/kernel/nv2a_pb_exec.c
++++ b/src/kernel/nv2a_pb_exec.c
+@@ -328,6 +328,182 @@ uint32_t nv2a_pb_exec_semaphore_releases(void) { return s_sema_releases; }
+ uint32_t nv2a_pb_exec_semaphore_last_va(void) { return s_sema_last_va; }
+ uint32_t nv2a_pb_exec_semaphore_last_value(void) { return s_sema_last_value; }
+ 
++/* The GPU's progress, as the title sees it (the toolkit roadmap's step 4).
++ *
++ * DMA_GET: the nv2a-ack loop sets it to PUT once a segment has been walked
++ * (xbox_memory_layout.c). The GPU moves it as it goes, and D3D reads it
++ * while the GPU works: how far a fence is from the GPU is what decides
++ * whether a wait spins or sleeps until an interrupt (XDK D3D's BlockOnTime,
++ * Burnout 3 sub_00351770). So at the stream's sync points -- a semaphore
++ * release, a software method -- the walk's position is published as GET.
++ * Inside a pushbuffer subroutine GET is where the GPU is, as on hardware;
++ * D3D falls back to its fence table for an address outside the ring.
++ *
++ * Release: everything before this point has been read. */
++#define NV2A_REGS_VA        0xFD000000u
++#define NV2A_USER_DMA_GET   0x800044u
++#define NV2A_PGRAPH_PATT_COLOR0 0x400B10u
++extern uint32_t nv2a_pb_walk_va(int *in_call);
++static uint32_t s_progress_gets;
++
++/* RECOMP_GPU_PROGRESS: off by default while the executor still finishes
++ * each segment before the title may kick the next (then GET = PUT at the
++ * segment's end says all there is to say). On, the title sees the GPU's
++ * position sooner, which changes when its push-buffer waits wake and so
++ * the timing of a frame (the roadmap's step 4 frame check: the same race,
++ * render-time effects a few frames apart). It is for a GPU that runs
++ * behind the title (step 5), and on by default with RECOMP_RUN_AHEAD.
++ * =1: GET and PATT_COLOR0; =get, =patt: one; =0 off even with run-ahead. */
++enum { PROGRESS_GET = 1, PROGRESS_PATT = 2 };
++static int progress_mode(void)
++{
++    static int m = -1;
++    if (m < 0) {
++        const char *e = getenv("RECOMP_GPU_PROGRESS");
++        const char *ra = getenv("RECOMP_RUN_AHEAD");
++        if ((!e || !*e) && ra && *ra && *ra != '0')
++            e = "1";                    /* run-ahead needs it */
++        m = !e || !*e || !strcmp(e, "0") ? 0
++          : !strcmp(e, "get")  ? PROGRESS_GET
++          : !strcmp(e, "patt") ? PROGRESS_PATT
++          : PROGRESS_GET | PROGRESS_PATT;
++        if (m)
++            fprintf(stderr, "  [GPU] RECOMP_GPU_PROGRESS: %s%s\n",
++                    m & PROGRESS_GET ? "DMA_GET at sync points " : "",
++                    m & PROGRESS_PATT ? "PATT_COLOR0 at fences" : "");
++    }
++    return m;
++}
++
++static volatile uint32_t *nv2a_reg(uint32_t off)
++{
++    return (volatile uint32_t *)((uint8_t *)xbox_GetMemoryOffset()
++                                 + NV2A_REGS_VA + off);
++}
++
++static void gpu_progress(void)
++{
++    uint32_t va = nv2a_pb_walk_va(NULL), get;
++    volatile uint32_t *g;
++
++    if (!va || !(progress_mode() & PROGRESS_GET))
++        return;
++    get = va & 0x0FFFFFFFu;            /* GET is physical, like PUT */
++    g = nv2a_reg(NV2A_USER_DMA_GET);
++    __atomic_thread_fence(__ATOMIC_RELEASE);
++    if (*g != get) {
++        *g = get;
++        s_progress_gets++;
++        xbox_SpinWake();               /* a lowered wait may be sleeping on it */
++    }
++}
++
++/* The walk's position as GET every 64 words (nv2a_pb_scan.c), with
++ * RECOMP_GPU_PROGRESS's GET on. Between sync points too: BlockOnTime
++ * decides from GET whether the GPU is 9 KB or more from a fence, and if so
++ * writes its NOP 5 over the fence's padding and sleeps until the GPU gets
++ * there. A GET last moved at a sync point long before could say "far" of a
++ * walker already reading that padding, and the NOP would be missed: within
++ * 64 words (256 bytes and some inline data), it cannot. Outside a
++ * subroutine only (D3D's ring); no wake-up, as nothing waits on GET short
++ * of PUT, which the ack loop's segment end sets and wakes. */
++void nv2a_pb_walk_progress(void)
++{
++    int in_call;
++    uint32_t va;
++
++    if (!(progress_mode() & PROGRESS_GET))
++        return;
++    va = nv2a_pb_walk_va(&in_call);
++    if (va && !in_call)
++        *nv2a_reg(NV2A_USER_DMA_GET) = va & 0x0FFFFFFFu;
++}
++
++/* The semaphore release's target (BACK_END_WRITE_SEMAPHORE_RELEASE): the
++ * registered fence word plus the offset, else dma_resolve's guess. */
++static uint32_t sema_target(uint32_t offset)
++{
++    static int on = -1, said = -1;
++    uint32_t fw = 0, va;
++
++    if (on < 0) {
++        const char *e = getenv("RECOMP_SEMA_BASE");
++        on = !(e && *e == '0');
++    }
++    if (on)
++        fw = xbox_Nv2aFenceWordVa();
++    va = fw ? (XBOX_CONTIG_BASE | ((fw + offset) & 0x0FFFFFFFu)) : dma_resolve(offset);
++    if (said != (fw != 0)) {
++        said = fw != 0;
++        fprintf(stderr, "  [GPU] semaphore releases (offset 0x%08X) land at 0x%08X: %s\n",
++                offset, va, fw ? "the fence mirror's word (the DMA object's base)"
++                   : on ? "no fence mirror yet; DMA object assumed at 0"
++                        : "RECOMP_SEMA_BASE=0, DMA object assumed at 0");
++    }
++    return va;
++}
++
++/* Software methods: NO_OPERATION with a non-zero parameter.
++ *
++ * XDK D3D uses the NOP as a software method. On the console the GPU stops on
++ * it and raises PGRAPH's interrupt (xemu: NV_PGRAPH_INTR_ERROR, NSOURCE
++ * notification, the method and parameter trapped), and D3D's handler
++ * (Burnout 3: sub_00357000 -> sub_00357250, the low five bits of the
++ * parameter picking one of 14 cases) does the work. Case 1 is the swap,
++ * scheduled by flip_pacing_swap below. Case 5 is the one a GPU that runs
++ * behind the title needs: BlockOnTime, waiting on a fence the GPU is far
++ * from, writes a WAIT_FOR_IDLE and a NOP 5 over the fence's padding and
++ * sleeps on an event that the handler sets.
++ *
++ * The interrupt itself is not raised: PGRAPH_INTR is write-1-to-clear, and
++ * against plain memory D3D's acknowledgement writes the pending bit back, so
++ * its service loop (sub_00356BF0) would see it pending for ever. Instead the
++ * handler's work is done here, on the executor's thread, as the swap's is:
++ * the title registers what its D3D's cases do (nv2a_pb_set_swmethod_handler),
++ * since where D3D keeps the event is the title's build of D3D. A case with
++ * no handler is counted and said once; on the console it would have been
++ * handled, so a title that relies on one says so here. */
++static nv2a_swmethod_fn s_swm_fn;
++static uint32_t s_swm_seen[32], s_swm_handled[32];
++
++void nv2a_pb_set_swmethod_handler(nv2a_swmethod_fn fn)
++{
++    s_swm_fn = fn;
++}
++
++void nv2a_pb_swmethod_counts(uint32_t seen[32], uint32_t handled[32])
++{
++    memcpy(seen, s_swm_seen, sizeof s_swm_seen);
++    memcpy(handled, s_swm_handled, sizeof s_swm_handled);
++}
++
++uint32_t nv2a_pb_progress_gets(void) { return s_progress_gets; }
++
++static void flip_pacing_swap(uint32_t param);
++
++static void software_method(uint32_t subch, uint32_t param)
++{
++    uint32_t sw = param & 0x1Fu, n;
++    int done;
++
++    gpu_progress();                    /* the GPU stops here: GET says so */
++    if (sw == 1) {
++        flip_pacing_swap(param);
++        s_swm_seen[1]++;
++        s_swm_handled[1]++;
++        return;
++    }
++    done = s_swm_fn ? s_swm_fn(subch, param) : 0;
++    n = ++s_swm_seen[sw];
++    if (done)
++        s_swm_handled[sw]++;
++    /* Said the first time, then at each power of two. */
++    if ((n & (n - 1)) == 0)
++        fprintf(stderr, "  [GPU] software method %u (NOP 0x%08X) at flip %u:"
++                " %s, %u so far\n", sw, param, s_gpu.flips,
++                done ? "handled" : "NO HANDLER", n);
++}
++
+ /* Switches come from recomp_env(): read once at startup, an array load per
+  * lookup. The walker consults them per method, batch and triangle, and a
+  * getenv there (a locked linear scan under Wine) was most of its time. */
+@@ -2783,14 +2959,22 @@ void nv2a_split_flip(uint32_t flip)
+     us = tick > s_split_tick0 ? (double)(ns - s_split_ns0) / (double)(tick - s_split_tick0) / 1e3
+                               : 0.0;
+     fprintf(s_split_out, "%u,%.3f,%.6f,%u", flip, ns / 1e6, us * 1e3, s->rate);
++    /* The sampled columns scaled to the whole picture: a class's time by
++     * its headers over the ones timed, the draw parts by the draws over the
++     * ones timed (before, the CSV had the timed share alone, about a
++     * quarter of the picture's at the default rate). */
+     for (i = 0; i < PBS_N; i++)
+         fprintf(s_split_out, ",%u,%u,%u,%.1f", s->hdr[i], s->words[i], s->hdr_timed[i],
+-                (double)s->hdr_ticks[i] * us);
++                (double)s->hdr_ticks[i] * us
++                    * (s->hdr_timed[i] ? (double)s->hdr[i] / s->hdr_timed[i] : 0.0));
+     fprintf(s_split_out, ",%u,%u", s->draws, s->draws_timed);
+-    for (i = 0; i < VKS_N; i++)
+-        fprintf(s_split_out, ",%.1f", (double)s->vk_ticks[i] * us);
+-    for (i = 0; i < VKX_N; i++)
+-        fprintf(s_split_out, ",%u,%.1f", s->vkx_calls[i], (double)s->vkx_ticks[i] * us);
++    {
++        double dk = s->draws_timed ? (double)s->draws / s->draws_timed : 0.0;
++        for (i = 0; i < VKS_N; i++)
++            fprintf(s_split_out, ",%.1f", (double)s->vk_ticks[i] * us * dk);
++        for (i = 0; i < VKX_N; i++)
++            fprintf(s_split_out, ",%u,%.1f", s->vkx_calls[i], (double)s->vkx_ticks[i] * us * dk);
++    }
+     for (i = 0; i < PBD_N; i++)
+         fprintf(s_split_out, ",%u,%u,%.1f", s->kd[i], s->kv[i], (double)s->kd_ns[i] / 1e3);
+     fprintf(s_split_out, ",%u,%u,%.1f,%u,%u,%u,%.1f,%u,%u,%.1f,%u,%u,%.1f\n", s->rehash,
+@@ -5893,9 +6077,15 @@ static void ff_transform(uint32_t *base, uint32_t stride, uint32_t n,
+             s_ff_imm_culled++;
+             return;
+         }
+-        p[0] = o[0] / o[3];
+-        p[1] = o[1] / o[3];
+-        p[2] = o[2] / o[3];
++        /* The viewport offset (SET_VIEWPORT_OFFSET: the view's corner on
++         * the surface plus the half-pixel bias) is not in the composite:
++         * the transform unit adds it after the divide, as the vertex
++         * program's epilogue does (c[59]). A view at the surface's corner
++         * hides that; one elsewhere on it (a split screen's second view)
++         * drew its glows and particles in the first view's place. */
++        p[0] = o[0] / o[3] + s_vsh.vp_off[0];
++        p[1] = o[1] / o[3] + s_vsh.vp_off[1];
++        p[2] = o[2] / o[3] + s_vsh.vp_off[2];
+         if (size >= 4)
+             p[3] = 1.0f / o[3];                /* rhw, as a screen-space vertex */
+     }
+@@ -6929,6 +7119,18 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
+         }
+     }
+     if (subch != 0) {                      /* 3D class lives on subchannel 0 */
++        /* XDK D3D's fence starts with subchannel 5's method 0x310, the
++         * pattern object's SET_MONOCHROME_COLOR0, whose parameter carries
++         * the fence's time in bits 2..6. The GPU keeps it in PGRAPH's
++         * PATT_COLOR0 (0x400B10), and D3D's wait-for-idle compares that
++         * with the semaphore (sub_00351700; xbox_memory_layout.c,
++         * pgraph_fence_tick, which follows it once a segment is done).
++         * Written here as the GPU writes it, as the fence is reached
++         * (RECOMP_GPU_PROGRESS, above). */
++        if (subch == 5 && method == 0x0310 && (progress_mode() & PROGRESS_PATT)) {
++            *nv2a_reg(NV2A_PGRAPH_PATT_COLOR0) = param;
++            return;
++        }
+         note_unhandled(method, param);
+         return;
+     }
+@@ -7106,10 +7308,24 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
+     case NV097_BACK_END_WRITE_SEMAPHORE_RELEASE: {
+         /* The semaphore offset is a DMA-object offset like every other one
+          * here, so it goes through the same resolution. The DMA object's own
+-         * base is not read (no RAMHT/PRAMIN walk yet); for XDK D3D it covers
+-         * physical memory from 0, which is what dma_resolve assumes, and the
+-         * first release is logged so a title where that is false says so. */
+-        uint32_t va = dma_resolve(s_gpu.sema_offset);
++         * base is not read (no RAMHT/PRAMIN walk yet); dma_resolve assumes
++         * one covering physical memory from 0, and the first release is
++         * logged so a title where that is false says so.
++         *
++         * It is false for XDK 5849 D3D (Burnout 3): the semaphore's DMA
++         * object starts at the device's GPU-time word ([device+0x30],
++         * 0x803E7000) and the offset is 0, so the releases landed on
++         * physical 0 ("semaphore release 0x00000005 -> 0x80000000") and the
++         * fence mirror, seeing the executor never write the fence word,
++         * stayed on: at the top of every ack-loop pass it marked everything
++         * submitted as done, before the walker had read it (roadmap step 5:
++         * harmless-looking while the title waits for each segment, fatal
++         * once it runs ahead -- D3D reused push buffer the walker had not
++         * read). So with a fence mirror registered, the DMA object's base is
++         * the mirror's fence word, and the release lands where D3D reads
++         * it; the mirror then steps aside (fence_mirrors_tick).
++         * RECOMP_SEMA_BASE=0: the old target. */
++        uint32_t va = sema_target(s_gpu.sema_offset);
+         uint8_t *mem = (uint8_t *)xbox_GetMemoryOffset();
+ 
+         if (!s_gpu.sema_offset_set) {
+@@ -7129,6 +7345,7 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
+         s_sema_last_va = va;
+         s_sema_last_value = param;
+         xbox_SpinWake();   /* a fence wait may be sleeping on this word */
++        gpu_progress();    /* and GET: the GPU is past the fence */
+         if (s_sema_releases++ == 0 || recomp_env(RENV_PB_SEMA_TRACE)) {
+             static unsigned shown;
+             if (shown++ < 16) {
+@@ -7161,7 +7378,8 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
+         return;
+ 
+     case NV097_NO_OPERATION:
+-        flip_pacing_swap(param);
++        if (param)
++            software_method(0, param);
+         note_unhandled(method, param);   /* still listed in the survey */
+         return;
+ 
+diff --git a/src/kernel/nv2a_pb_scan.c b/src/kernel/nv2a_pb_scan.c
+index 4891073..335da5f 100644
+--- a/src/kernel/nv2a_pb_scan.c
++++ b/src/kernel/nv2a_pb_scan.c
+@@ -290,6 +290,20 @@ static const char *stop_salvage(const uint8_t *mem, uint32_t from, uint32_t to,
+  * the header and some of its data now and the rest with the next PUT. So
+  * the method in progress outlives one walk. */
+ static uint32_t s_left, s_subch, s_method;
++/* Where the walk has got to: the address after the word it is executing,
++ * a guest VA in the contiguous window. The executor publishes it as DMA_GET
++ * at the stream's sync points (nv2a_pb_exec.c, gpu_progress), as the GPU's
++ * own GET moves while it works rather than once its segment is done. Only
++ * the walker's thread writes it, and only that thread reads it. */
++static uint32_t s_walk_va, s_walk_in_call, s_walk_words;
++void nv2a_pb_walk_progress(void);   /* nv2a_pb_exec.c */
++
++uint32_t nv2a_pb_walk_va(int *in_call)
++{
++    if (in_call)
++        *in_call = (int)s_walk_in_call;
++    return s_walk_va;
++}
+ static int s_noninc;
+ 
+ /* RECOMP_TRACE=pb_slow[=ms]: the method the executor stood in. A frame that
+@@ -596,8 +610,15 @@ void nv2a_pb_scan(uint32_t start_va, uint32_t end_va)
+                 s_run_first = w;
+                 s_run_have = 1;
+             }
+-            if (s_exec_enabled)
++            if (s_exec_enabled) {
++                s_walk_va = va;
++                s_walk_in_call = (uint32_t)in_call;
+                 nv2a_pb_exec_method(s_subch, s_method, w);
++                /* And every 64 words, between the sync points (a long run
++                 * of draws has none): see nv2a_pb_walk_progress. */
++                if ((++s_walk_words & 63) == 0)
++                    nv2a_pb_walk_progress();
++            }
+             if (!s_noninc)
+                 s_method += 4;
+             if (--s_left == 0 && s_run_t0)
+diff --git a/src/kernel/nv2a_pb_state.h b/src/kernel/nv2a_pb_state.h
+index b6250a8..b4477a7 100644
+--- a/src/kernel/nv2a_pb_state.h
++++ b/src/kernel/nv2a_pb_state.h
+@@ -240,6 +240,19 @@ struct nv2a_pb_vsh {
+ 
+ /* Read-only views of the executor's state. */
+ const struct nv2a_pb_gpu *nv2a_pb_gpu_state(void);
++
++/* A title's handler for the XDK D3D software methods other than the swap
++ * (NO_OPERATION with a non-zero parameter, nv2a_pb_exec.c,
++ * software_method): called on the executor's thread when the walk reaches
++ * one, with the subchannel and the NOP's parameter (the case is its low
++ * five bits). Returns 1 when it did the case's work, 0 when it does not
++ * know the case. NULL unregisters. */
++typedef int (*nv2a_swmethod_fn)(uint32_t subch, uint32_t param);
++void nv2a_pb_set_swmethod_handler(nv2a_swmethod_fn fn);
++/* Software methods seen and handled so far, by case (0..31). */
++void nv2a_pb_swmethod_counts(uint32_t seen[32], uint32_t handled[32]);
++/* Times the walk moved DMA_GET at a sync point (gpu_progress). */
++uint32_t nv2a_pb_progress_gets(void);
+ /* The index-batch counters of the [GPU] summary line: the largest batch,
+  * the batches that lost indices past NV_MAX_INDICES, and the indices past
+  * 0xFFFF truncated to 16 bits. For the backend smoke test. */
 diff --git a/src/kernel/xbox_memory_layout.c b/src/kernel/xbox_memory_layout.c
-index 801f117..a76a6cb 100644
+index 801f117..f493816 100644
 --- a/src/kernel/xbox_memory_layout.c
 +++ b/src/kernel/xbox_memory_layout.c
-@@ -2141,6 +2141,15 @@ ptrdiff_t g_xbox_mem_offset = 0;
+@@ -1599,6 +1599,29 @@ static int fence_completed(uint32_t *out)
+     return 0;
+ }
+ 
++/* Where the first fence-mirror device's fence word is (the guest VA its
++ * device holds, e.g. 0x803E7000), 0 when there is none yet. The executor's
++ * semaphore releases land there (nv2a_pb_exec.c, sema_target). */
++uint32_t xbox_Nv2aFenceWordVa(void)
++{
++    for (int i = 0; i < g_fence_mirror_count; i++) {
++        uint32_t dev, get_ptr;
++
++        if (!fence_readable(g_fence_mirrors[i].device_ptr_va, 4))
++            continue;
++        dev = *(volatile uint32_t *)((uintptr_t)g_fence_mirrors[i].device_ptr_va
++                                     + g_memory_offset);
++        if (!fence_readable(dev + g_fence_mirrors[i].get_ptr_off, 4))
++            continue;
++        get_ptr = *(volatile uint32_t *)((uintptr_t)(dev + g_fence_mirrors[i].get_ptr_off)
++                                         + g_memory_offset);
++        if (!fence_readable(get_ptr, 4))
++            continue;
++        return get_ptr;
++    }
++    return 0;
++}
++
+ static void pgraph_fence_tick(volatile uint32_t *regs)
+ {
+     uint32_t v;
+@@ -1797,9 +1820,77 @@ static DWORD WINAPI nv2a_kick_thread(LPVOID param)
+     return 0;
+ }
+ 
++/* Run-ahead (the toolkit roadmap's step 5; RECOMP_RUN_AHEAD=1, default off).
++ *
++ * The flush is acknowledged at once, so the title builds its next segments
++ * -- and its next frame -- while the walker draws the last ones, as on the
++ * console, where the GPU runs behind the CPU. What the comment above says
++ * goes wrong is answered by the roadmap's step 4: the NOP-with-notify that
++ * BlockOnTime puts in the push buffer when it is far from the GPU is done
++ * by the executor (nv2a_pb_exec.c, software_method; the title's D3D case 5
++ * sets the event it sleeps on), and the GPU's position reaches the title
++ * as it goes (RECOMP_GPU_PROGRESS, on with run-ahead): DMA_GET at the
++ * stream's sync points, PATT_COLOR0 at each fence. The title's D3D then
++ * keeps itself out of what the walker has not read, as on the console.
++ *
++ * The acknowledgement is the title's own: KickOff's wait is a lowered spin
++ * (0x00351BF0 in Burnout 3), so each pass calls xbox_SpinWait, which calls
++ * xbox_Nv2aRunAheadKick. That needs present.pacing=sleep, where the lowered
++ * loops call in; under "spin" pacing they do not, and the ack loop keeps
++ * the job as before (said once at startup). */
++static volatile uint32_t *g_kick_regs;
++static int g_run_ahead;
++static uint32_t g_ra_acks, g_ra_out_max;
++static uint64_t g_ra_out_sum;
++
++int xbox_Nv2aRunAhead(void)
++{
++    return g_run_ahead;
++}
++
++void xbox_Nv2aRunAheadKick(void)
++{
++    volatile uint32_t *kr;
++    uint32_t put, get, out, n;
++
++    if (!g_run_ahead || !g_kick_regs)
++        return;
++    kr = (volatile uint32_t *)((char *)g_kick_regs + NV2A_KICK_REG);
++    if (!(*kr & NV2A_KICK_BIT))
++        return;
++    __atomic_fetch_and((uint32_t *)kr, ~NV2A_KICK_BIT, __ATOMIC_ACQ_REL);
++    /* How far the title is ahead of the walker as it goes on: PUT is
++     * still the last segment's, GET where the walker last said it was. */
++    put = *(volatile uint32_t *)((char *)g_kick_regs + NV2A_USER_DMA_PUT);
++    get = *(volatile uint32_t *)((char *)g_kick_regs + NV2A_USER_DMA_GET);
++    out = put >= get ? put - get : 0;      /* a wrap: not counted */
++    g_ra_out_sum += out;
++    if (out > g_ra_out_max)
++        g_ra_out_max = out;
++    n = ++g_ra_acks;
++    kick_cleared(nv2a_pb_now_ns());
++    if (n == 1)
++        fprintf(stderr, "  [GPU] run-ahead: the first flush acknowledged at once"
++                " (the walker behind by %u bytes)\n", out);
++    if ((n & 8191) == 0) {
++        fprintf(stderr, "  [GPU] run-ahead: %u flushes acknowledged at once; the walker"
++                " behind by %.1f KB on average, %.1f KB at most\n", n,
++                g_ra_out_sum / 8192.0 / 1024.0, g_ra_out_max / 1024.0);
++        g_ra_out_sum = 0;
++        g_ra_out_max = 0;
++    }
++}
++
+ static void xbox_Nv2aKickStart(void *regs)
+ {
+     const char *e = recomp_env(RENV_FAST_KICK);
++    const char *ra = getenv("RECOMP_RUN_AHEAD");
++    g_kick_regs = (volatile uint32_t *)regs;
++    g_run_ahead = ra && *ra && *ra != '0';
++    if (g_run_ahead)
++        fprintf(stderr, "  NV2A run-ahead (RECOMP_RUN_AHEAD): the KickOff flush is"
++                " acknowledged at once by the title's own wait (needs"
++                " present.pacing=sleep; the first one is said)\n");
+     g_kick_fast = !(e && *e == '0');
+     fprintf(stderr, "  NV2A KickOff flush: %s\n", g_kick_fast
+             ? "ack loop polls at ~50 us while kicking (RECOMP_DEBUG=fast_kick=0: Sleep(1))"
+@@ -2141,6 +2232,15 @@ ptrdiff_t g_xbox_mem_offset = 0;
  uint32_t g_xbox_image_lo = 0;
  uint32_t g_xbox_image_hi = 0;
  
@@ -27,7 +624,7 @@ index 801f117..a76a6cb 100644
  /* Toolkit region placement (xbox_memory_layout.h). The initial values are the
   * small-image layout; xbox_MemoryLayoutInit recomputes them from the image. */
  uint32_t g_xbox_region_base = XBOX_REGION_MIN;
-@@ -2652,10 +2661,35 @@ static void watch_posix_stack(void *ucv)
+@@ -2652,10 +2752,35 @@ static void watch_posix_stack(void *ucv)
      }
      if (reps)
          fprintf(stderr, "            (previous frame x%d more)\n", reps);
@@ -63,7 +660,7 @@ index 801f117..a76a6cb 100644
  }
  
  static void watch_posix_handler(int sig, siginfo_t *si, void *ucv)
-@@ -3495,7 +3529,16 @@ BOOL xbox_MemoryLayoutInit(const void *xbe_data, size_t xbe_size)
+@@ -3495,7 +3620,16 @@ BOOL xbox_MemoryLayoutInit(const void *xbe_data, size_t xbe_size)
      {
          const uint32_t MB = 1024u * 1024u;
          uint32_t image_end = (g_xbox_image_hi + 0xFFFFu) & ~0xFFFFu;
@@ -82,7 +679,7 @@ index 801f117..a76a6cb 100644
          uint32_t top = XBOX_HEAP_TOP;
          uint32_t avail = top > stack_base ? top - stack_base : 0;
 diff --git a/src/kernel/xbox_memory_layout.h b/src/kernel/xbox_memory_layout.h
-index d893f33..fd79d64 100644
+index d893f33..1f3d6f9 100644
 --- a/src/kernel/xbox_memory_layout.h
 +++ b/src/kernel/xbox_memory_layout.h
 @@ -96,6 +96,10 @@ uint32_t xbox_ReserveAlloc(uint32_t size, uint32_t align);
@@ -96,6 +693,20 @@ index d893f33..fd79d64 100644
  
  extern uint32_t g_xbox_code_lo;
  extern uint32_t g_xbox_code_hi;
+@@ -181,6 +185,13 @@ void xbox_Nv2aFrameCounterFlip(void);
+ /* KickOff flushes acknowledged since the last call, and (if measured) the
+  * total time the title spun waiting for them. Resets both. */
+ uint32_t xbox_Nv2aKickStats(uint64_t *wait_ns);
++/* Run-ahead (RECOMP_RUN_AHEAD, xbox_memory_layout.c): on, and the title's
++ * KickOff flush acknowledged by its own wait (xbox_SpinWait). */
++int xbox_Nv2aRunAhead(void);
++void xbox_Nv2aRunAheadKick(void);
++/* The fence word of the title's registered fence mirror (a guest VA), 0
++ * when there is none yet (xbox_memory_layout.c). */
++uint32_t xbox_Nv2aFenceWordVa(void);
+ 
+ /* Tell the runtime where the display framebuffer is (from AvSetDisplayMode). */
+ void xbox_SetDisplayFramebuffer(uint32_t fb_va, uint32_t pitch);
 diff --git a/tools/recomp/__main__.py b/tools/recomp/__main__.py
 index b84f841..c06c2d9 100644
 --- a/tools/recomp/__main__.py

@@ -4,6 +4,42 @@ What changed in each release of Takedawn, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Major releases carry
 a codename, a song title from the game's soundtrack.
 
+## 0.3.1-4p (fork: four-player split screen)
+
+An unofficial build of 0.3.1 from the fork leanbgit/takedawn, Windows only
+(a portable zip). Saves and settings from 0.3.1 carry over (copy them into
+`data\Saves`).
+
+### Added
+
+- Four-player split screen for the North America disc: `[splitscreen]
+  players = 4` in `settings.toml`. Multiplayer races with four views, one per
+  quarter, each player with their own car (car select has turns for players 3
+  and 4), chase camera, HUD (boost bar, award pop-ups, widescreen HUD fix),
+  engine sound, reflections and sun glare; the track and traffic stream
+  around all four. Players 3 and 4 drive with the third and fourth
+  controllers (each controller takes the next free player at its first
+  button press), the keyboard's arrow keys (`keyboard_player`), or the
+  game's AI (`ai_players`). See docs/split4.md.
+- `run_ahead` (on by default with four players): the graphics are drawn one
+  frame behind the game, so the game builds the next frame meanwhile. Four
+  players: about 43 fps before, about 59 now.
+
+### Fixed
+
+- Exhaust boost flames (fixed-function glows) are drawn in place in every
+  split-screen view, not only the top-left one.
+
+### Known limitations
+
+- The results screen lists players 1 and 2 only.
+- Eliminator's end rule was written for two players; Road Rage has not been
+  played to its end with four.
+- Props and textures stream around players 1 and 2; all four share one set
+  of speakers.
+- The European discs' programs are 0.3.1's, with two players.
+- Settings > System > Check for updates asks this fork's releases.
+
 ## 0.3.1 "Sing Along Forever"
 
 Saves and settings from 0.3.0 carry over.

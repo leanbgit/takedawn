@@ -3864,6 +3864,11 @@ int main(int argc, char **argv)
      * a RECOMP_* variable the user set wins over it, it wins over the
      * defaults below (xbox_settings.h). */
     xbox_SettingsInit(BO3_USER_DIR);
+    {   /* [splitscreen] in the same file: the four-player split screen
+         * (split4/settings.c), into its variables like the settings above. */
+        extern void split4_settings_load(const char *path);
+        split4_settings_load(xbox_SettingsPath());
+    }
     /* The saved diagnostic_log is in force from here (BO-193); the one line
      * says the state and what decided it. */
     if (!bug_report)
@@ -3975,10 +3980,12 @@ int main(int argc, char **argv)
     /* The System page's "Check for updates" (BO-100): the one request to
      * GitHub's latest-release record is made only when that row is pressed.
      * TAKEDAWN_UPDATE_REPO points it at another repository, for the tests of
-     * the "a newer version is out" answer. Not on Android: no row there. */
+     * the "a newer version is out" answer. Not on Android: no row there.
+     * The four-player split screen's releases are on its own fork
+     * (docs/split4.md, Releases), so this build asks there. */
     {
         const char *repo = getenv("TAKEDAWN_UPDATE_REPO");
-        xbox_OverlaySetUpdateCheck(repo && repo[0] ? repo : "xenophobentx/takedawn", bo3_version_number());
+        xbox_OverlaySetUpdateCheck(repo && repo[0] ? repo : "leanbgit/takedawn", bo3_version_number());
     }
 #if defined(__linux__) && !defined(__ANDROID__)
     /* "Add Steam library art" (BO-143): for a player who updated and never sees

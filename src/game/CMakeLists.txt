@@ -56,6 +56,7 @@ if(ANDROID)
         split4/views.c
         split4/streaming.c
         split4/sound.c
+        split4/settings.c
         hraudit.c
     mixer.c
     gp_image.c
@@ -138,6 +139,7 @@ add_executable(burnout3
     split4/views.c
     split4/streaming.c
     split4/sound.c
+    split4/settings.c
     hraudit.c
     mixer.c
     gp_image.c

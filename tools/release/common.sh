@@ -61,7 +61,10 @@ esac
 BO3_REGION=NTSC-U
 # (no slash in it: the READMEs take it through sed)
 DISC_NAME="the North America (NTSC-U) retail disc or one of the two European (PAL) ones"
-APP_TITLE="Takedawn"; PKG_TAG=""; ID_SUFFIX=""; PKG_REGIONS="NTSC-U PAL PAL-ENSV"
+APP_TITLE="Takedawn"; PKG_TAG=""; ID_SUFFIX=""; PKG_REGIONS="${TAKEDAWN_PKG_REGIONS:-NTSC-U PAL PAL-ENSV}"
+# TAKEDAWN_PKG_REGIONS=NTSC-U: only the main program (the four-player split
+# screen's package, tools/release/build-windows-4p.sh, which takes the other
+# discs' programs from the upstream release).
 export BO3_REGION
 
 # use_region <region>: one program of the package. PROG_REGION (its
