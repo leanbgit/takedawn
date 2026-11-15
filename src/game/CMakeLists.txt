@@ -119,6 +119,8 @@ add_executable(burnout3
     unlockall.c
     glyphs.c
     shaderbuild.c
+    bench.c
+    d3dswm.c
     upscale.c
     upscale_art.c
     soundtrack.c

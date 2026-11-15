@@ -1022,6 +1022,12 @@
       "note": "sub_00016D00: after the players' cameras' vtable + 4 (0x167BE0, a reset: ecx the camera, no arguments) for camera 0 and camera 1, unrolled, and the store after them (`mov [edi + 0x2E18C], ebx`). BO3_SPLIT4 with four racing does it for cameras 2 and 3 here (src/game/split4/camera.c)."
     },
     {
+      "va": "0x000336EF",
+      "kind": "mark",
+      "name": "s4_sun_vis",
+      "note": "sub_00033130, the sun's visibility test (one a view, from sub_00188EE0 just before sub_00033740 draws the glare): after the read of the oldest test (sub_0034E040), where both its branches meet: a result sets 0x45D180 (the sun's visible part, the glare's strength) and 0x45D188 = 1; 'not done yet' (D3DERR_TESTINCOMPLETE) sets 1.0 and 0. BO3_SPLIT4: each view keeps its own tests and result (src/game/split4/views.c, s4_sun_switch at s4_env_view), and an unfinished test keeps the view's last result instead of full glare."
+    },
+    {
       "va": "0x001AE37F",
       "kind": "mark",
       "name": "s4_env_view",

@@ -233,6 +233,18 @@ access, guest calls, the title's addresses more than one file uses).
      3 and 4. It runs for two now; players 3 and 4 have entries of their own
      (`0x7BEA00`, worked out by the same call and set in for their views'
      draws) and their effects records get theirs;
+   - the sun's glare: each view measures how much of the sun is in sight
+     with a GPU visibility test (`sub_00188EE0` -> `sub_00033130`, just
+     before `sub_00033740` draws the glare): it issues a test into one of
+     ten slots (counter `0x45D18C`) and reads the oldest unread one
+     (`0x45D174`) into the glare's strength (`0x45D180`, valid flag
+     `0x45D188`). One queue and one result for every view, so a view read
+     whichever view's test was oldest (player 1's glare followed player 3's
+     camera), and an unfinished test gave 1.0, a full glare. Each view has
+     its own counters in its own two slots (view k: 2k, 2k + 1) and its own
+     result, swapped in at its render's start (mark `s4_env_view`), and an
+     unfinished test keeps the view's last result (mark `s4_sun_vis`,
+     `0x336EF`). `BO3_SPLIT4_SKIP=sun` turns it off;
    - the AI rivals' look at the humans (`sub_00105BD0`, from an AI
      driver's update `sub_00104A90`; the drivers are 0x1580 bytes at
      world + `0x26120`, vtable `0x3B1240`): each human's squared distance

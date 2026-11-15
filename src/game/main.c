@@ -4398,6 +4398,18 @@ int main(int argc, char **argv)
     else
         bo3_shaderbuild_host_init(headless);
 #endif
+    {
+        /* The GPU's software methods D3D's interrupt handler would run
+         * (d3dswm.c); before any push buffer is walked. */
+        extern void bo3_d3dswm_init(void);
+        bo3_d3dswm_init();
+    }
+    {
+        /* BO3_BENCH: a fixed race played by itself, for measuring (bench.c) */
+        extern void bo3_bench_start(void);
+        if (!sb_scene)
+            bo3_bench_start();
+    }
 #if defined(BO3_HAVE_UPSCALE)
     /* The "Upscale menu pictures" rows (BO-311), on the overlay's Mods page (BO-327). */
     if (!sb_scene)

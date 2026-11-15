@@ -42,13 +42,96 @@ uint32_t s4_fx(unsigned k)
     return k < 2 ? S4_MGR + 0x1D0u + k * S4_VIEW_SIZE : S4_FX34 + (k - 2) * S4_VIEW_SIZE;
 }
 
+/* ---- The sun's glare, per view -------------------------------------------
+ *
+ * Each view measures how much of the sun is in sight with a GPU visibility
+ * test (sub_00188EE0 -> sub_00033130, just before sub_00033740 draws the
+ * glare from the result): it issues a test into one of ten slots (counter
+ * 0x45D18C, mod 10) and reads the oldest one not read yet (counter
+ * 0x45D174), whose visible part becomes the glare's strength (0x45D180,
+ * 0x45D188 = 1). One queue and one result for every view: a view reads
+ * whichever view's test is oldest, so with four views player 1's glare
+ * followed player 3's camera (the user's "sun position follows another
+ * player"), and a test the GPU has not finished ("incomplete") gives 1.0, a
+ * full glare. That happens more with the GPU running a frame behind
+ * (RECOMP_RUN_AHEAD).
+ *
+ * So each view has its own counters, in its own two slots (view k: 2k and
+ * 2k + 1, eight of the ten), and its own result, swapped in at its render's
+ * start (s4_env_view) and out at the next view's; it reads its own test of
+ * the frame before. A test not finished yet keeps the view's last result
+ * (s4_sun_vis) instead of the full glare. With one view (one player) the
+ * same, for view 0. BO3_SPLIT4_SKIP=sun: as shipped. */
+#define S4_SUN_RD    0x0045D174u   /* the next test to read (mod 10) */
+#define S4_SUN_WR    0x0045D18Cu   /* the next test to issue (mod 10) */
+#define S4_SUN_VIS   0x0045D180u   /* float: the sun's visible part, the glare */
+#define S4_SUN_OK    0x0045D188u   /* byte: VIS is a measurement */
+
+static struct {
+    uint32_t rd, wr, vis, good;
+    uint8_t ok, have, good_ok;
+} s_sun[SPLIT4_MAX_PLAYERS];
+static int s_sun_view = -1;
+static unsigned s_sun_held;
+
+/* A counter put back in view k's two slots, its parity kept. */
+static uint32_t s4_sun_slot(uint32_t c, unsigned k)
+{
+    return 2u * k + ((c - 2u * k) & 1u);
+}
+
+static void s4_sun_switch(int v)
+{
+    if (s_sun_view >= 0) {
+        unsigned k = (unsigned)s_sun_view;
+        s_sun[k].rd = s4_sun_slot(S4_M32(S4_SUN_RD), k);
+        s_sun[k].wr = s4_sun_slot(S4_M32(S4_SUN_WR), k);
+        s_sun[k].vis = S4_M32(S4_SUN_VIS);
+        s_sun[k].ok = S4_M8(S4_SUN_OK);
+    }
+    s_sun_view = v;
+    if (v < 0)
+        return;
+    if (!s_sun[v].have) {
+        s_sun[v].rd = s_sun[v].wr = 2u * (unsigned)v;
+        s_sun[v].vis = S4_M32(S4_SUN_VIS);
+        s_sun[v].ok = 0;
+        s_sun[v].have = 1;
+    }
+    S4_W32(S4_SUN_RD) = s_sun[v].rd;
+    S4_W32(S4_SUN_WR) = s_sun[v].wr;
+    S4_W32(S4_SUN_VIS) = s_sun[v].vis;
+    S4_W8(S4_SUN_OK) = s_sun[v].ok;
+}
+
+/* s4_sun_vis: sub_00033130 has read its test (both branches meet). */
+static void split4_sun_vis(void)
+{
+    unsigned k;
+    if (s_sun_view < 0)
+        return;
+    k = (unsigned)s_sun_view;
+    if (S4_M8(S4_SUN_OK)) {
+        s_sun[k].good = S4_M32(S4_SUN_VIS);
+        s_sun[k].good_ok = 1;
+    } else if (s_sun[k].good_ok) {
+        S4_W32(S4_SUN_VIS) = s_sun[k].good;   /* not done yet: the last result */
+        S4_W8(S4_SUN_OK) = 1;
+        if (s_sun_held++ < 4)
+            fprintf(stderr, "[SPLIT4] sun test of view %u not done yet: its last"
+                    " result kept (%u so far)\n", k, s_sun_held);
+    }
+}
+
 /* s4_env_view: the object at 0x60E040 keeps an entry per view (+ 0xB0,
  * 0x40 each) for two views, its current view (+ 0x130) right after them.
  * Views 2 and 3 take entries 0 and 1, with their own entries set in for
- * their draws (s4_sky_swap). */
+ * their draws (s4_sky_swap). And the view's own sun test (above). */
 static void split4_env_view(void)
 {
     uint32_t v = S4_M32(0x0060E170u);
+    if (split4_enabled() && !s4_skip("sun") && v < SPLIT4_MAX_PLAYERS)
+        s4_sun_switch((int)v);
     if (v >= 2u && v < SPLIT4_MAX_PLAYERS)
         S4_W32(0x0060E170u) = v & 1u;
 }
@@ -258,6 +341,7 @@ void split4_render_views(void (*gen)(void))
 void s4_views_start_marks(void)
 {
     recomp_patch_on_mark("s4_env_view", split4_env_view);
+    recomp_patch_on_mark("s4_sun_vis", split4_sun_vis);
 }
 
 /* ---- A reflection cube per view, redrawn in turns -----------------------
