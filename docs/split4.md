@@ -7,8 +7,8 @@ as the two-player stage behaves today.
 Status: playable (North America disc). Four humans (or the title's AI for
 players 3 and 4) race the two-player stage to the end, four views, four
 HUDs, the track streamed around each player, about 59 fps with run-ahead.
-Without `[splitscreen] players = 4` (or `BO3_SPLIT4`) two players race as
-before. What is left: [Known limitations](#known-limitations) and step 5
+It is on by default; `[splitscreen] players = 2` (or `BO3_SPLIT4=0`) races
+two players as before. What is left: [Known limitations](#known-limitations) and step 5
 (the finish rule, the results screens).
 
 ## Turning it on
@@ -17,13 +17,13 @@ before. What is left: [Known limitations](#known-limitations) and step 5
 settings, which keep the section through every save):
 
     [splitscreen]
-    players = 4            # 2 (the title's own split screen) or 4
+    players = 4            # the default; 2: the title's own split screen
     ai_players = "none"    # "3", "4" or "34": the title's AI drives them
     keyboard_player = 1    # 1: the keyboard is player 1's (default); 3 or 4: the arrows in the race
     cars = "copy"          # players 3's and 4's cars before they pick (BO3_SPLIT4_CARS)
     run_ahead = true       # RECOMP_RUN_AHEAD: the GPU a frame behind the title
 
-`players = 4` sets `BO3_SPLIT4=4`, `RECOMP_USB_PADS=4` and (unless
+`players = 4` (also with no file or no key) sets `BO3_SPLIT4=4`, `RECOMP_USB_PADS=4` and (unless
 `run_ahead = false`) `RECOMP_RUN_AHEAD=1`; the others set `BO3_SPLIT4_AI`,
 `BO3_SPLIT4_KEYS` and `BO3_SPLIT4_CARS`. A variable already in the
 environment wins over the file. The European discs' programs say so in the

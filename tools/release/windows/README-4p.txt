@@ -23,17 +23,18 @@ First start
   The European (PAL) discs work too, but as in Takedawn @UPVERSION@: two
   players. Only the North America disc's program has the four-player code.
 
-Turning four players on
-  Start the game once and quit. In data\Saves, open settings.toml in a
-  text editor (Notepad is fine), or make it if it is not there yet, add
-  these lines at the end and save:
+Four players
+  Four players are on from the start: choose Multiplayer > Race (or Road
+  Rage) in the game and four players pick their cars in turn.
+
+  The options are lines in data\Saves\settings.toml. Open it in a text
+  editor (Notepad is fine), or make it if it is not there yet, add the
+  lines at the end and save. For the two-player split screen as shipped:
 
       [splitscreen]
-      players = 4
+      players = 2
 
-  Then choose Multiplayer > Race (or Road Rage) in the game. Four players
-  pick their cars in turn. players = 2 (or no [splitscreen] lines) is the
-  game as shipped. The other settings of that section, all optional:
+  The other settings of that section, all optional:
 
       ai_players = "none"   # the game's AI drives "3", "4" or "34"
                             #   (players 3 and 4) when you are fewer
@@ -43,7 +44,9 @@ Turning four players on
       run_ahead = true      # draws a frame behind the game: about 60 fps
                             #   with four players instead of about 43
 
-  The settings are read when the game starts.
+  The settings are read when the game starts. Fewer than four people? A
+  player without a controller sits still in the race unless the game's AI
+  drives them (ai_players).
 
 Controllers
   Four controllers: each one becomes the next free player when its first

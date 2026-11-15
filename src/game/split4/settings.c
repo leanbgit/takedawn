@@ -6,7 +6,7 @@
  * settings, into the variables the split screen and the runtime read:
  *
  *   [splitscreen]
- *   players = 4            # 2 (the title's own split screen) or 4
+ *   players = 4            # 4 (the default) or 2 (the title's own split screen)
  *   ai_players = "none"    # who of players 3 and 4 the game drives:
  *                          #   "none", "3", "4" or "34"
  *   keyboard_player = 1    # the keyboard drives player 1 (default); 3 or 4:
@@ -15,7 +15,7 @@
  *                          #   "copy", "random" or names (docs/split4.md)
  *   run_ahead = true       # the GPU a frame behind the game (60 fps in 4P)
  *
- * players = 4 sets BO3_SPLIT4, four emulated controllers (RECOMP_USB_PADS)
+ * With no file or no players key it is 4. players = 4 sets BO3_SPLIT4, four emulated controllers (RECOMP_USB_PADS)
  * and, unless run_ahead = false, RECOMP_RUN_AHEAD. A variable already in the
  * environment wins over the file, as for every other setting (run-4p.cmd
  * and the like keep working). Only the North America disc's program has the
@@ -49,24 +49,20 @@ void split4_settings_load(const char *path)
     long long players;
     const char *s;
 
-    if (!path || !*path)
-        return;
-    {
+    /* No file (the first start) or no players key: four, the point of this
+     * build. players = 2 is the title's own split screen. */
+    c = NULL;
+    if (path && *path) {
         FILE *probe = fopen(path, "rb");
-        if (!probe)
-            return;
-        fclose(probe);
+        if (probe) {
+            fclose(probe);
+            c = recomp_cfg_load_file_flags(path, RCFG_REOPEN_TABLES, err, sizeof err);
+            /* NULL: the toolkit's loader said why; the defaults then */
+        }
     }
-    c = recomp_cfg_load_file_flags(path, RCFG_REOPEN_TABLES, err, sizeof err);
-    if (!c)
-        return;                         /* the toolkit's loader said why */
-    if (recomp_cfg_type_of(c, "splitscreen.players") == RCFG_NONE) {
-        recomp_cfg_free(c);
-        return;
-    }
-    players = recomp_cfg_int(c, "splitscreen.players", 2);
+    players = recomp_cfg_int(c, "splitscreen.players", 4);
 #if (defined(BO3_REGION_PAL) && BO3_REGION_PAL) || (defined(BO3_REGION_PAL_ENSV) && BO3_REGION_PAL_ENSV)
-    if (players == 4)
+    if (recomp_cfg_type_of(c, "splitscreen.players") != RCFG_NONE && players == 4)
         fprintf(stderr, "[SPLIT4] splitscreen.players = 4: only the North America"
                 " disc's program has the four-player split screen; this is the %s"
                 " one, so two players as shipped\n", BO3_REGION_NAME);
@@ -79,6 +75,13 @@ void split4_settings_load(const char *path)
                     players);
         recomp_cfg_free(c);
         return;
+    }
+    {   /* BO3_SPLIT4=0 in the environment: two players, as the file's 2 */
+        const char *v = getenv("BO3_SPLIT4");
+        if (v && *v == '0') {
+            recomp_cfg_free(c);
+            return;
+        }
     }
     s4_setenv_keep("BO3_SPLIT4", "4");
     s4_setenv_keep("RECOMP_USB_PADS", "4");
@@ -117,7 +120,7 @@ void split4_settings_load(const char *path)
     recomp_env_reload();                /* RECOMP_USB_PADS is read from the cache */
 
     fprintf(stderr, "[SPLIT4] settings: four players (%s), run-ahead %s, AI %s,"
-            " arrow keys player %s\n", path,
+            " arrow keys player %s\n", c ? path : "defaults",
             getenv("RECOMP_RUN_AHEAD") && *getenv("RECOMP_RUN_AHEAD") != '0' ? "on" : "off",
             getenv("BO3_SPLIT4_AI") ? getenv("BO3_SPLIT4_AI") : "none",
             getenv("BO3_SPLIT4_KEYS") && *getenv("BO3_SPLIT4_KEYS") > '0' ? getenv("BO3_SPLIT4_KEYS") : "1");

@@ -51,12 +51,12 @@ upstream.
   install the data from your own disc in the setup window, as in Takedawn.
 - **Disc:** four players need the North America (NTSC-U) disc. The European
   discs work, with two players as in Takedawn 0.3.1.
-- **Turn it on:** add this to `settings.toml` (in `data\Saves` beside
-  `Takedawn.exe`) and start the game:
+- **On by default.** The options go in `settings.toml` (in `data\Saves`
+  beside `Takedawn.exe`):
 
   ```toml
   [splitscreen]
-  players = 4            # 2 is the game as shipped
+  players = 4            # the default; 2 is the game's own split screen
   ai_players = "none"    # or "3", "4", "34": the game's AI drives them
   keyboard_player = 1    # the keyboard is player 1's; 3 or 4: the arrows drive that player
   run_ahead = true       # about 60 fps with four players instead of about 43

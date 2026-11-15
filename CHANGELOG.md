@@ -12,8 +12,8 @@ An unofficial build of 0.3.1 from the fork leanbgit/takedawn, Windows only
 
 ### Added
 
-- Four-player split screen for the North America disc: `[splitscreen]
-  players = 4` in `settings.toml`. Multiplayer races with four views, one per
+- Four-player split screen for the North America disc, on by default
+  (`[splitscreen] players = 2` in `settings.toml` for two). Multiplayer races with four views, one per
   quarter, each player with their own car (car select has turns for players 3
   and 4), chase camera, HUD (boost bar, award pop-ups, widescreen HUD fix),
   engine sound, reflections and sun glare; the track and traffic stream
